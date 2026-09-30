@@ -356,6 +356,101 @@ def test_list_events_aggregates_broad_fallback_by_calendar(monkeypatch) -> None:
     assert events[0].calendar_name == "Work"
 
 
+_BATCH_EVENT = {
+    "event_id": "event-123",
+    "title": "Planning",
+    "calendar_id": "calendar-1",
+    "calendar_name": "Work",
+    "start": "2026-03-27T10:00:00-05:00",
+    "end": "2026-03-27T10:30:00-05:00",
+    "all_day": False,
+    "location": "Room 1",
+}
+
+
+def _batch_bridge(monkeypatch, captured, payload):
+    bridge = CalendarBridge(Path("/tmp/source.swift"), Path("/tmp/helper"))
+
+    def fake_run_helper(command: str, *args: str) -> dict[str, object]:
+        if command == "get-calendar-event":
+            raise CalendarBridgeError("EVENT_NOT_FOUND", "explicit mocked native miss")
+        captured["command"] = command
+        captured["request"] = json.loads(args[0]) if args else None
+        return payload
+
+    def missing_fallback(event_id):
+        raise CalendarBridgeError("EVENT_NOT_FOUND", "explicit mocked fallback miss")
+
+    monkeypatch.setattr(bridge, "_run_helper", fake_run_helper)
+    monkeypatch.setattr(bridge, "_fallback_get_event", missing_fallback)
+    return bridge
+
+
+def test_get_events_sends_one_request_for_every_id(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    bridge = _batch_bridge(monkeypatch, captured, {
+        "count": 1,
+        "items": [{"event_id": "event-123", "found": True, "event": _BATCH_EVENT}],
+    })
+
+    resolved = bridge.get_events(["event-123"])
+
+    assert captured["command"] == "get-calendar-events"
+    assert captured["request"] == {"event_ids": ["event-123"]}
+    assert resolved["event-123"].title == "Planning"
+
+
+def test_get_events_maps_a_reported_miss_to_none(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    bridge = _batch_bridge(monkeypatch, captured, {
+        "count": 2,
+        "items": [
+            {"event_id": "event-123", "found": True, "event": _BATCH_EVENT},
+            {"event_id": "gone-1", "found": False, "error_code": "EVENT_NOT_FOUND"},
+        ],
+    })
+
+    resolved = bridge.get_events(["event-123", "gone-1"])
+
+    assert resolved["event-123"] is not None
+    assert resolved["gone-1"] is None
+
+
+def test_get_events_omits_ids_the_helper_did_not_answer_for(monkeypatch) -> None:
+    """Absence must not read as "gone". A caller that deletes a stored mapping
+    on not-found has to be able to tell a positive miss from a non-answer."""
+    captured: dict[str, object] = {}
+    bridge = _batch_bridge(monkeypatch, captured, {
+        "count": 1,
+        "items": [{"event_id": "event-123", "found": True, "event": _BATCH_EVENT}],
+    })
+
+    resolved = bridge.get_events(["event-123", "never-mentioned"])
+
+    assert "never-mentioned" not in resolved
+
+
+def test_get_events_omits_unrecognized_entry_shapes(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    bridge = _batch_bridge(monkeypatch, captured, {
+        "count": 2,
+        "items": [
+            {"event_id": "a", "found": True},                             # no event
+            {"event_id": "b", "found": False, "error_code": "SOMETHING"},  # unknown code
+        ],
+    })
+
+    assert bridge.get_events(["a", "b"]) == {}
+
+
+def test_get_events_makes_no_call_for_an_empty_list(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    bridge = _batch_bridge(monkeypatch, captured, {"count": 0, "items": []})
+
+    assert bridge.get_events([]) == {}
+    assert captured == {}
+
+
 # The JXA update fallback assigns startDate and endDate one at a time, and
 # Calendar.app validates after every single assignment. Moving an event later
 # in the day used to write the new start while the old end was still in place,
@@ -528,3 +623,161 @@ def test_update_event_fallback_keeps_working_for_overlapping_and_single_bound_mo
     end_only = update(None, "2026-03-27T16:00:00Z")
     assert end_only["start"] == "2026-03-27T13:30:00.000Z"
     assert end_only["end"] == "2026-03-27T16:00:00.000Z"
+
+@pytest.mark.parametrize("event_ids", ["abc", b"abc", {"a"}, {"a": True}, None, 42, [""] , ["  "], ["a", None], ["a", 1]])
+def test_batch_rejects_invalid_ids_before_lookup(monkeypatch, event_ids) -> None:
+    bridge = CalendarBridge(Path("/tmp/source.swift"), Path("/tmp/helper"))
+
+    def unexpected(*args):
+        raise AssertionError("invalid input must not reach a helper")
+
+    monkeypatch.setattr(bridge, "_run_helper", unexpected)
+    with pytest.raises(CalendarBridgeError) as failure:
+        bridge.get_events(event_ids)
+    assert failure.value.error_code == "INVALID_INPUT"
+
+
+def test_batch_rejects_oversized_input_before_any_lookup(monkeypatch) -> None:
+    bridge = CalendarBridge(Path("/tmp/source.swift"), Path("/tmp/helper"))
+
+    def unexpected(*args):
+        raise AssertionError("oversized input must not reach a helper")
+
+    monkeypatch.setattr(bridge, "_run_helper", unexpected)
+    for ids in (["a"] * 10001, ["small", "a" * 32768], ["small", "😀" * 3000]):
+        with pytest.raises(CalendarBridgeError) as failure:
+            bridge.get_events(ids)
+        assert failure.value.error_code == "INVALID_INPUT"
+
+
+@pytest.mark.parametrize("items", [
+    None, {}, "items", [None], [42], [["not", "an", "object"]],
+    [{"event_id": ["a"], "found": False, "error_code": "EVENT_NOT_FOUND"}],
+    [{"event_id": "a", "error_code": "EVENT_NOT_FOUND"}],
+    [{"event_id": "a", "found": 0, "error_code": "EVENT_NOT_FOUND"}],
+    [{"event_id": "a", "found": 1, "event": {**_BATCH_EVENT, "event_id": "a"}}],
+    [{"event_id": "a", "found": False, "error_code": "EVENT_NOT_FOUND", "event": {}}],
+    [{"event_id": "a", "found": True, "event": {**_BATCH_EVENT, "event_id": "other"}}],
+    [{"event_id": "a", "found": True, "event": {"event_id": "a"}}],
+    [{"event_id": "a", "found": True, "event": {**_BATCH_EVENT, "event_id": "a", "all_day": "false"}}],
+    [{"event_id": "a", "found": True, "error_code": "EVENT_NOT_FOUND", "event": {**_BATCH_EVENT, "event_id": "a"}}],
+    [{"event_id": "unrequested", "found": False, "error_code": "EVENT_NOT_FOUND"}],
+])
+def test_batch_unanswered_or_malformed_entries_stay_unknown(monkeypatch, items) -> None:
+    bridge = _batch_bridge(monkeypatch, {}, {"items": items})
+
+    def unexpected(event_id):
+        raise AssertionError("malformed entry must not trigger an absence-confirming lookup")
+
+    monkeypatch.setattr(bridge, "get_event", unexpected)
+    assert bridge.get_events(["a"]) == {}
+
+
+@pytest.mark.parametrize("entries", [
+    [
+        {"event_id": "a", "found": True, "event": {**_BATCH_EVENT, "event_id": "a"}},
+        {"event_id": "a", "found": False, "error_code": "EVENT_NOT_FOUND"},
+    ],
+    [
+        {"event_id": "a", "found": False, "error_code": "EVENT_NOT_FOUND"},
+        {"event_id": "a", "found": True, "event": {**_BATCH_EVENT, "event_id": "a"}},
+    ],
+    [
+        {"event_id": "a", "found": False, "error_code": "EVENT_NOT_FOUND"},
+        {"event_id": "a", "found": False, "error_code": "EVENT_NOT_FOUND"},
+    ],
+    [
+        {"event_id": "a", "found": True, "event": {**_BATCH_EVENT, "event_id": "a"}},
+        {"event_id": "a"},
+    ],
+])
+def test_batch_duplicate_results_stay_unknown(monkeypatch, entries) -> None:
+    bridge = _batch_bridge(monkeypatch, {}, {"items": entries})
+    assert bridge.get_events(["a"]) == {}
+
+
+@pytest.mark.parametrize("event_id", ["applescript::Work::2026-03-27T10:00:00Z::Planning", "jxa-uid-1"])
+def test_batch_preserves_live_jxa_identifier_like_single_get(monkeypatch, event_id) -> None:
+    bridge = CalendarBridge(Path("/tmp/source.swift"), Path("/tmp/helper"))
+    live = {**_BATCH_EVENT, "event_id": event_id}
+    calls = []
+
+    def native(command, *args):
+        calls.append(command)
+        if command == "get-calendar-events":
+            return {"items": [{"event_id": event_id, "found": False, "error_code": "EVENT_NOT_FOUND"}]}
+        raise CalendarBridgeError("EVENT_NOT_FOUND", "native identifiers do not resolve JXA IDs")
+
+    monkeypatch.setattr(bridge, "_run_helper", native)
+    monkeypatch.setattr(bridge, "_fallback_get_event", lambda requested: dict(live))
+
+    single = bridge.get_event(event_id)
+    batch = bridge.get_events([event_id])
+
+    assert batch[event_id].model_dump() == single.model_dump()
+    if event_id.startswith("applescript::"):
+        assert "get-calendar-events" not in calls
+
+
+def test_batch_synthetic_canonical_alias_stays_unknown(monkeypatch) -> None:
+    bridge = CalendarBridge(Path("/tmp/source.swift"), Path("/tmp/helper"))
+    monkeypatch.setattr(bridge, "get_event", lambda event_id: bridge._normalize_detail(_BATCH_EVENT))
+    assert bridge.get_events(["applescript::Work::start::Planning"]) == {}
+
+
+@pytest.mark.parametrize("error_code", ["PERMISSION_DENIED", "PERMISSION_UNKNOWN", "APPLESCRIPT_FALLBACK_TIMEOUT", "INVALID_HELPER_OUTPUT"])
+def test_batch_native_miss_with_failed_confirmation_is_unknown(monkeypatch, error_code) -> None:
+    bridge = _batch_bridge(monkeypatch, {}, {"items": [{"event_id": "a", "found": False, "error_code": "EVENT_NOT_FOUND"}]})
+
+    def fail_confirmation(event_id):
+        raise CalendarBridgeError(error_code, "unknown")
+
+    monkeypatch.setattr(bridge, "get_event", fail_confirmation)
+    assert bridge.get_events(["a"]) == {}
+
+
+def test_batch_permission_failure_preserves_existing_single_get_fallback(monkeypatch) -> None:
+    bridge = CalendarBridge(Path("/tmp/source.swift"), Path("/tmp/helper"))
+
+    def native(command, *args):
+        raise CalendarBridgeError("PERMISSION_DENIED", "native permission denied")
+
+    monkeypatch.setattr(bridge, "_run_helper", native)
+    monkeypatch.setattr(bridge, "_fallback_get_event", lambda event_id: {**_BATCH_EVENT, "event_id": event_id})
+
+    assert bridge.get_events(["a"])["a"].model_dump() == bridge.get_event("a").model_dump()
+
+
+def test_batch_transport_failure_remains_explicit(monkeypatch) -> None:
+    bridge = CalendarBridge(Path("/tmp/source.swift"), Path("/tmp/helper"))
+
+    def native(command, *args):
+        raise CalendarBridgeError("HELPER_UNAVAILABLE", "transport failure")
+
+    monkeypatch.setattr(bridge, "_run_helper", native)
+    with pytest.raises(CalendarBridgeError) as failure:
+        bridge.get_events(["a"])
+    assert failure.value.error_code == "HELPER_UNAVAILABLE"
+
+
+def test_batch_chunks_by_actual_encoded_bytes_and_dedupes_input(monkeypatch) -> None:
+    bridge = CalendarBridge(Path("/tmp/source.swift"), Path("/tmp/helper"))
+    calls = []
+    ids = ["first", *["é😀" * 100 + str(index) for index in range(90)]]
+
+    def native(command, *args):
+        assert command == "get-calendar-events"
+        assert len(args[0].encode("utf-8")) <= bridge._MAX_BATCH_PAYLOAD_BYTES
+        requested = json.loads(args[0])["event_ids"]
+        calls.append(requested)
+        return {"items": [
+            {"event_id": event_id, "found": True, "event": {**_BATCH_EVENT, "event_id": event_id}}
+            for event_id in requested
+        ]}
+
+    monkeypatch.setattr(bridge, "_run_helper", native)
+    result = bridge.get_events([*ids, ids[0]])
+    assert len(calls) > 1
+    assert [event_id for call in calls for event_id in call] == ids
+    assert list(result) == ids
+

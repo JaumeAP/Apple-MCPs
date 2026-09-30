@@ -82,6 +82,19 @@ claude mcp add --transport stdio --scope project apple-calendar -- uvx apple-cal
 
 </details>
 
+## Bridge Batch Lookup
+
+The internal Python `CalendarBridge.get_events(event_ids)` method batches native lookups without adding an MCP tool. Pass a sequence of non-empty strings, at most 10000 input IDs. Duplicate input IDs are resolved once. Requests are chunked to an exact 32768-byte UTF-8 JSON argv budget, including JSON escaping; an individual oversized ID is rejected before any lookup.
+
+The returned mapping distinguishes:
+- An event value: a validated response for the requested ID
+- None: an explicit native miss confirmed through the existing single-get/JXA fallback, or a definitive miss on that fallback path
+- An absent key: unknown, including unanswered, malformed, contradictory, duplicate-response, mismatched, or unsupported entries
+
+Known synthetic fallback IDs use the single-get path. Native misses also retry that path, so a live JXA-derived UID is not discarded just because EventKit cannot resolve it. Permission or per-ID confirmation failures remain unknown; non-fallback whole-helper transport failures remain explicit errors. A synthetic ID returning a different canonical UID is conservatively unknown. Callers must not delete mappings for absent keys.
+
+The native batch command itself reports EventKit-only lookup outcomes. Synthetic IDs produce UNSUPPORTED_IDENTIFIER; native EVENT_NOT_FOUND alone is not a confirmed absence across both backends.
+
 ## Safety Modes
 
 - `safe_readonly`

@@ -1,6 +1,7 @@
 import json
 import plistlib
 import subprocess
+from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
 
@@ -80,6 +81,131 @@ class CalendarBridge:
                 raise
             payload = self._fallback_get_event(event_id)
         return self._normalize_detail(payload)
+
+    _MAX_BATCH_IDS = 10000
+    _MAX_BATCH_PAYLOAD_BYTES = 32768
+
+    def get_events(self, event_ids: Sequence[str]) -> dict[str, EventDetail | None]:
+        """Resolve bounded batches without turning unanswered IDs into absence.
+
+        None means a valid explicit native miss confirmed by the existing
+        single-get fallback path, or a definitive miss on that path for a
+        fallback identifier. Missing keys mean unknown. Malformed, duplicate,
+        contradictory, unrequested, or mismatched native entries stay unknown.
+        All input is validated before any helper call. Each JSON argv payload
+        is at most 32768 UTF-8 bytes; at most 10000 input IDs are accepted.
+        """
+        if isinstance(event_ids, str | bytes | bytearray) or not isinstance(event_ids, Sequence):
+            raise CalendarBridgeError("INVALID_INPUT", "event_ids must be a sequence of non-empty strings.", None)
+        if len(event_ids) > self._MAX_BATCH_IDS:
+            raise CalendarBridgeError("INVALID_INPUT", "At most 10000 event IDs may be requested.", None)
+
+        ids: list[str] = []
+        seen: set[str] = set()
+        for event_id in event_ids:
+            if not isinstance(event_id, str) or not event_id.strip():
+                raise CalendarBridgeError("INVALID_INPUT", "Each event ID must be a non-empty string.", None)
+            if len(json.dumps({"event_ids": [event_id]}).encode("utf-8")) > self._MAX_BATCH_PAYLOAD_BYTES:
+                raise CalendarBridgeError("INVALID_INPUT", "An event ID exceeds the 32768-byte batch payload budget.", None)
+            if event_id not in seen:
+                seen.add(event_id)
+                ids.append(event_id)
+        if not ids:
+            return {}
+
+        fallback_ids = [event_id for event_id in ids if event_id.startswith(("applescript::", "uid:"))]
+        fallback_set = set(fallback_ids)
+        native_ids = [event_id for event_id in ids if event_id not in fallback_set]
+        chunks: list[list[str]] = []
+        chunk: list[str] = []
+        chunk_bytes = len(json.dumps({"event_ids": []}).encode("utf-8"))
+        for event_id in native_ids:
+            additional = len(json.dumps(event_id).encode("utf-8")) + (2 if chunk else 0)
+            if chunk and chunk_bytes + additional > self._MAX_BATCH_PAYLOAD_BYTES:
+                chunks.append(chunk)
+                chunk = []
+                chunk_bytes = len(json.dumps({"event_ids": []}).encode("utf-8"))
+                additional = len(json.dumps(event_id).encode("utf-8"))
+            chunk.append(event_id)
+            chunk_bytes += additional
+        if chunk:
+            chunks.append(chunk)
+
+        resolved: dict[str, EventDetail | None] = {}
+        self._resolve_batch_individually(fallback_ids, resolved)
+        for requested in chunks:
+            try:
+                payload = self._run_helper("get-calendar-events", json.dumps({"event_ids": requested}))
+            except CalendarBridgeError as exc:
+                if not self._should_use_read_fallback(exc):
+                    raise
+                self._resolve_batch_individually(requested, resolved)
+                continue
+            candidates = self._validated_batch_entries(payload, set(requested))
+            for event_id, event in candidates.items():
+                if event is None:
+                    # Native absence cannot distinguish a stale EventKit ID
+                    # from a live UID previously supplied by JXA.
+                    self._resolve_batch_individually([event_id], resolved)
+                else:
+                    resolved[event_id] = event
+        return {event_id: resolved[event_id] for event_id in ids if event_id in resolved}
+
+    def _resolve_batch_individually(
+        self, event_ids: Sequence[str], resolved: dict[str, EventDetail | None],
+    ) -> None:
+        for event_id in event_ids:
+            try:
+                event = self.get_event(event_id)
+            except CalendarBridgeError as exc:
+                if exc.error_code == "EVENT_NOT_FOUND":
+                    resolved[event_id] = None
+                # Permission, transport, or other lookup failures are unknown.
+                continue
+            except ValueError:
+                continue
+            # Single-get can return a canonical UID for a synthetic identifier.
+            # Conservatively keep that alias unknown rather than misattribute it.
+            if event.event_id == event_id:
+                resolved[event_id] = event
+
+    def _validated_batch_entries(
+        self, payload: object, requested: set[str],
+    ) -> dict[str, EventDetail | None]:
+        if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
+            return {}
+        candidates: dict[str, EventDetail | None] = {}
+        seen: set[str] = set()
+        duplicated: set[str] = set()
+        for item in payload["items"]:
+            if not isinstance(item, dict):
+                continue
+            event_id = item.get("event_id")
+            if not isinstance(event_id, str) or event_id not in requested:
+                continue
+            if event_id in seen:
+                duplicated.add(event_id)
+                candidates.pop(event_id, None)
+                continue
+            seen.add(event_id)
+            if item.get("found") is True and item.get("error_code") is None:
+                raw = item.get("event")
+                if not isinstance(raw, dict) or raw.get("event_id") != event_id:
+                    continue
+                try:
+                    EventDetail.model_validate(raw, strict=True)
+                    candidates[event_id] = self._normalize_detail(raw)
+                except ValueError:
+                    continue
+            elif (
+                item.get("found") is False
+                and item.get("error_code") == "EVENT_NOT_FOUND"
+                and item.get("event") is None
+            ):
+                candidates[event_id] = None
+        for event_id in duplicated:
+            candidates.pop(event_id, None)
+        return candidates
 
     def create_event(
         self,
