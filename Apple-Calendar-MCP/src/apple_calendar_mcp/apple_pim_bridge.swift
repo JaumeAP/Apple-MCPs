@@ -90,6 +90,18 @@ struct ListPayload<T: Encodable>: Encodable {
     let items: [T]
 }
 
+// One entry per requested id in a `get-calendar-events` batch. A batch is a
+// convenience over N `get-calendar-event` calls -- the expensive part of this
+// binary is process launch plus EKEventStore() setup, paid once per invocation
+// rather than per id -- so a missing id must stay a per-entry outcome here
+// instead of failing the whole call the way the single-event command does.
+struct BatchEventRecord: Encodable {
+    let event_id: String
+    let found: Bool
+    let event: EventRecord?
+    let error_code: String?
+}
+
 struct AccessStatusPayload: Encodable {
     let ok = true
     let domain: String
@@ -216,6 +228,19 @@ struct ApplePIMBridge {
                 throw usageError(command)
             }
             return try encode(try getEvent(store: store, eventID: arguments[0]))
+        case "get-calendar-events":
+            guard arguments.count == 1, arguments[0].utf8.count <= 32768 else {
+                throw BridgeFailure(errorCode: "INVALID_INPUT", message: "Batch payload must be one JSON argument of at most 32768 bytes.", suggestion: nil)
+            }
+            let payload = try decodeObjectArgument(arguments, expectedCount: 1)
+            guard let eventIDs = payload["event_ids"] as? [String], eventIDs.count <= 10000,
+                  eventIDs.allSatisfy({ !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) else {
+                throw BridgeFailure(errorCode: "INVALID_INPUT", message: "event_ids must contain at most 10000 non-empty strings.", suggestion: nil)
+            }
+            let store = EKEventStore()
+            try ensureAccess(store: store, entityType: .event)
+            let records = getEvents(store: store, eventIDs: eventIDs)
+            return try encode(ListPayload(count: records.count, items: records))
         case "create-calendar-event":
             let store = EKEventStore()
             try ensureAccess(store: store, entityType: .event)
@@ -398,6 +423,31 @@ struct ApplePIMBridge {
             )
         }
         return eventRecord(event)
+    }
+
+    // Deliberately non-throwing: one unresolvable id must not discard the
+    // lookups that succeeded. Native misses must still be confirmed through
+    // the Python bridge's existing single-get/JXA fallback before inferring absence.
+    static func getEvents(store: EKEventStore, eventIDs: [String]) -> [BatchEventRecord] {
+        eventIDs.map { eventID in
+            if eventID.hasPrefix("applescript::") || eventID.hasPrefix("uid:") {
+                return BatchEventRecord(event_id: eventID, found: false, event: nil, error_code: "UNSUPPORTED_IDENTIFIER")
+            }
+            guard let event = store.event(withIdentifier: eventID) else {
+                return BatchEventRecord(
+                    event_id: eventID,
+                    found: false,
+                    event: nil,
+                    error_code: "EVENT_NOT_FOUND"
+                )
+            }
+            return BatchEventRecord(
+                event_id: eventID,
+                found: true,
+                event: eventRecord(event),
+                error_code: nil
+            )
+        }
     }
 
     static func createEvent(store: EKEventStore, payload: [String: Any]) throws -> EventRecord {
