@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import subprocess
 
+_OSASCRIPT_TIMEOUT_SECONDS = 30
+
 
 class MessagesAutomationBridgeError(Exception):
     def __init__(self, error_code: str, message: str, suggestion: str | None = None) -> None:
@@ -28,14 +30,16 @@ class MessagesAutomationBridge:
             raise MessagesAutomationBridgeError("INVALID_INPUT", "recipient must not be empty", "Provide an explicit iMessage address or phone number.")
         if not text.strip():
             raise MessagesAutomationBridgeError("INVALID_INPUT", "text must not be empty", "Provide a non-empty message body.")
-        script = f'''
-        tell application "Messages"
-            set targetService to first service whose service type = iMessage
-            set targetBuddy to buddy "{self._escape(recipient)}" of targetService
-            send "{self._escape(text)}" to targetBuddy
-        end tell
+        script = '''
+        on run argv
+            tell application "Messages"
+                set targetService to first service whose service type = iMessage
+                set targetBuddy to buddy (item 1 of argv) of targetService
+                send (item 2 of argv) to targetBuddy
+            end tell
+        end run
         '''
-        self._run_script(script)
+        self._run_script(script, recipient, text)
         return {
             "sent": True,
             "recipient": recipient,
@@ -49,13 +53,15 @@ class MessagesAutomationBridge:
         if not text.strip():
             raise MessagesAutomationBridgeError("INVALID_INPUT", "text must not be empty", "Provide a non-empty message body.")
 
-        script = f'''
-        tell application "Messages"
-            set targetChat to chat id "{self._escape(chat_id)}"
-            send "{self._escape(text)}" to targetChat
-        end tell
+        script = '''
+        on run argv
+            tell application "Messages"
+                set targetChat to chat id (item 1 of argv)
+                send (item 2 of argv) to targetChat
+            end tell
+        end run
         '''
-        self._run_script(script)
+        self._run_script(script, chat_id, text)
         return {
             "sent": True,
             "chat_id": chat_id,
@@ -68,18 +74,19 @@ class MessagesAutomationBridge:
         if not file_path.strip():
             raise MessagesAutomationBridgeError("INVALID_INPUT", "file_path must not be empty", "Provide a valid file path.")
 
-        send_parts = [f'send POSIX file "{self._escape(file_path)}" to targetBuddy']
-        if text and text.strip():
-            send_parts.append(f'send "{self._escape(text)}" to targetBuddy')
-
-        script = f'''
-        tell application "Messages"
-            set targetService to first service whose service type = iMessage
-            set targetBuddy to buddy "{self._escape(recipient)}" of targetService
-            {chr(10).join(send_parts)}
-        end tell
+        script = '''
+        on run argv
+            tell application "Messages"
+                set targetService to first service whose service type = iMessage
+                set targetBuddy to buddy (item 1 of argv) of targetService
+                send (POSIX file (item 2 of argv)) to targetBuddy
+                if (item 3 of argv) is not "" then
+                    send (item 3 of argv) to targetBuddy
+                end if
+            end tell
+        end run
         '''
-        self._run_script(script)
+        self._run_script(script, recipient, file_path, text if text and text.strip() else "")
         return {
             "sent": True,
             "recipient": recipient,
@@ -87,9 +94,20 @@ class MessagesAutomationBridge:
             "text": text,
         }
 
-    def _run_script(self, script: str) -> str:
+    def _run_script(self, script: str, *args: str) -> str:
+        # Untrusted values travel as `on run argv` arguments, never inside the script source.
+        command = ["osascript", "-e", script]
+        if args:
+            command.append("--")
+            command.extend(args)
         try:
-            completed = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, check=False)
+            completed = subprocess.run(command, capture_output=True, text=True, check=False, timeout=_OSASCRIPT_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired as exc:
+            raise MessagesAutomationBridgeError(
+                "AUTOMATION_TIMEOUT",
+                f"Messages automation did not finish within {_OSASCRIPT_TIMEOUT_SECONDS} seconds. The message may or may not have been sent.",
+                "Verify in Messages.app whether the message went out before retrying, to avoid sending a duplicate.",
+            ) from exc
         except OSError as exc:
             raise MessagesAutomationBridgeError(
                 "OSASCRIPT_UNAVAILABLE",
@@ -107,6 +125,3 @@ class MessagesAutomationBridge:
                 )
             raise MessagesAutomationBridgeError("AUTOMATION_FAILED", message, "Inspect Messages.app state and retry.")
         return completed.stdout.strip()
-
-    def _escape(self, value: str) -> str:
-        return value.replace("\\", "\\\\").replace('"', '\\"')

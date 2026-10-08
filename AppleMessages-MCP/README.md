@@ -86,6 +86,13 @@ claude mcp add --transport stdio --scope project apple-messages -- uvx apple-mes
 
 `stdio` is the default and recommended transport. Set `APPLE_MESSAGES_MCP_TRANSPORT=streamable-http` (with optional `APPLE_MESSAGES_MCP_HOST` and `APPLE_MESSAGES_MCP_PORT`) to serve Streamable HTTP instead.
 
+## Attachment Roots
+
+`messages_send_attachment` only sends files that live under an allowed root. Symlinks are resolved before the check, so a link inside an allowed root that points elsewhere is rejected with `PATH_NOT_ALLOWED`.
+
+- Default roots: `~/Downloads`, `~/Desktop`, `~/Documents`
+- Override with `APPLE_MESSAGES_MCP_ALLOWED_ATTACHMENT_ROOTS`, a list of directories separated by `:` (`os.pathsep`), for example `~/Downloads:~/Shared/Outbox`
+
 ## macOS Permissions
 
 - Automation access to Messages is required for send and reply
