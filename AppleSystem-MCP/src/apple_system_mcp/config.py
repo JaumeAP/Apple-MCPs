@@ -1,6 +1,7 @@
 import os
 from dataclasses import dataclass
 from functools import lru_cache
+from pathlib import Path
 
 
 @dataclass(frozen=True)
@@ -12,6 +13,8 @@ class Settings:
     host: str
     port: int
     log_level: str
+    apps_helper_source: Path
+    apps_helper_binary: Path
 
 
 def _parse_int(value: str | None, default: int) -> int:
@@ -25,6 +28,12 @@ def _parse_int(value: str | None, default: int) -> int:
 
 @lru_cache(maxsize=1)
 def load_settings() -> Settings:
+    helper_build_dir = Path(
+        os.environ.get(
+            "APPLE_SYSTEM_MCP_HELPER_BUILD_DIR",
+            str(Path.home() / ".apple-mcps" / "build"),
+        )
+    ).expanduser()
     return Settings(
         server_name="Apple System MCP",
         version="1.0.5",
@@ -33,4 +42,6 @@ def load_settings() -> Settings:
         host=os.environ.get("APPLE_SYSTEM_MCP_HOST", "127.0.0.1"),
         port=_parse_int(os.environ.get("APPLE_SYSTEM_MCP_PORT"), 8000),
         log_level=os.environ.get("APPLE_SYSTEM_MCP_LOG_LEVEL", "INFO").strip().upper() or "INFO",
+        apps_helper_source=Path(__file__).resolve().parent / "system_apps_bridge.swift",
+        apps_helper_binary=helper_build_dir / "apple-system-apps-bridge",
     )
