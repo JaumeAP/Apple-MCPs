@@ -1,3 +1,4 @@
+import os
 import shutil
 import subprocess
 import sys
@@ -7,6 +8,19 @@ import pytest
 
 from apple_contacts_mcp import contacts_bridge
 from apple_contacts_mcp.contacts_bridge import AppleContactsBridge, ContactsBridgeError
+
+# For tests that replace _run_script: the helper is never compiled or run.
+UNUSED_HELPER = (Path("/tmp/contacts_bridge.swift"), Path("/tmp/apple-contacts-bridge"))
+
+
+def ready_bridge(tmp_path: Path) -> AppleContactsBridge:
+    """A bridge whose helper binary is newer than its source, so nothing is compiled."""
+    source = tmp_path / "contacts_bridge.swift"
+    binary = tmp_path / "apple-contacts-bridge"
+    source.touch()
+    binary.touch()
+    os.utime(binary, (source.stat().st_mtime + 1, source.stat().st_mtime + 1))
+    return AppleContactsBridge(source, binary)
 
 
 def contact_item(
@@ -32,7 +46,7 @@ def contact_item(
 
 
 def test_search_contacts_matches_phone_number(monkeypatch) -> None:
-    bridge = AppleContactsBridge(Path("/tmp/scripts"))
+    bridge = AppleContactsBridge(*UNUSED_HELPER)
 
     def fake_run_script(script_name: str, *args: str) -> dict[str, object]:
         if script_name == "search_contacts.applescript":
@@ -70,7 +84,7 @@ def test_search_contacts_matches_phone_number(monkeypatch) -> None:
     ],
 )
 def test_search_contacts_scans_past_first_thousand(monkeypatch, query, field, value) -> None:
-    bridge = AppleContactsBridge(Path("/tmp/scripts"))
+    bridge = AppleContactsBridge(*UNUSED_HELPER)
     directory = [contact_item(f"contact-{index}") for index in range(1001)]
     directory.append(
         contact_item(
@@ -99,7 +113,7 @@ def test_search_contacts_scans_past_first_thousand(monkeypatch, query, field, va
 
 
 def test_search_contacts_keeps_exact_matches_before_earlier_partial_matches(monkeypatch) -> None:
-    bridge = AppleContactsBridge(Path("/tmp/scripts"))
+    bridge = AppleContactsBridge(*UNUSED_HELPER)
     directory = [contact_item("contact-partial", phone="+1 555 000 10010")]
     directory.extend(contact_item(f"contact-{index}") for index in range(1, 1000))
     directory.append(contact_item("contact-exact", phone="555 000 1001"))
@@ -116,7 +130,7 @@ def test_search_contacts_keeps_exact_matches_before_earlier_partial_matches(monk
 
 
 def test_resolve_recipient_finds_contact_after_first_thousand(monkeypatch) -> None:
-    bridge = AppleContactsBridge(Path("/tmp/scripts"))
+    bridge = AppleContactsBridge(*UNUSED_HELPER)
     directory = [contact_item(f"contact-{index}") for index in range(1001)]
     late_contact = contact_item("contact-late", name="Late Recipient", phone="+1 555 777 9999")
     directory.append(late_contact)
@@ -138,7 +152,7 @@ def test_resolve_recipient_finds_contact_after_first_thousand(monkeypatch) -> No
 
 
 def test_search_contacts_prefers_direct_name_search(monkeypatch) -> None:
-    bridge = AppleContactsBridge(Path("/tmp/scripts"))
+    bridge = AppleContactsBridge(*UNUSED_HELPER)
 
     def fake_run_script(script_name: str, *args: str) -> dict[str, object]:
         assert script_name == "search_contacts.applescript"
@@ -168,7 +182,7 @@ def test_search_contacts_prefers_direct_name_search(monkeypatch) -> None:
 
 
 def test_get_contact_raises_when_missing(monkeypatch) -> None:
-    bridge = AppleContactsBridge(Path("/tmp/scripts"))
+    bridge = AppleContactsBridge(*UNUSED_HELPER)
 
     def fake_run_script(script_name: str, *args: str) -> dict[str, object]:
         assert script_name == "get_contact.applescript"
@@ -186,8 +200,7 @@ def test_get_contact_raises_when_missing(monkeypatch) -> None:
 
 def test_run_script_times_out_and_terminates_child(monkeypatch, tmp_path) -> None:
     script_path = tmp_path / "permission_check.applescript"
-    script_path.touch()
-    bridge = AppleContactsBridge(tmp_path)
+    bridge = ready_bridge(tmp_path)
     real_popen = subprocess.Popen
 
     def sleeping_popen(command, **kwargs):
@@ -210,13 +223,12 @@ def test_stop_process_handles_exit_before_terminate() -> None:
         def wait(self, timeout=None) -> int:
             return 0
 
-    AppleContactsBridge(Path("/tmp/scripts"))._stop_process(ExitedProcess())
+    AppleContactsBridge(*UNUSED_HELPER)._stop_process(ExitedProcess())
 
 
 def test_run_script_rejects_oversized_output(monkeypatch, tmp_path) -> None:
     script_path = tmp_path / "permission_check.applescript"
-    script_path.touch()
-    bridge = AppleContactsBridge(tmp_path)
+    bridge = ready_bridge(tmp_path)
     real_popen = subprocess.Popen
 
     def noisy_popen(command, **kwargs):
@@ -232,7 +244,7 @@ def test_run_script_rejects_oversized_output(monkeypatch, tmp_path) -> None:
 
 
 def test_search_contacts_matches_parenthetical_nickname(monkeypatch) -> None:
-    bridge = AppleContactsBridge(Path("/tmp/scripts"))
+    bridge = AppleContactsBridge(*UNUSED_HELPER)
 
     def fake_run_script(script_name: str, *args: str) -> dict[str, object]:
         assert script_name == "search_contacts.applescript"
@@ -265,7 +277,7 @@ def test_search_contacts_matches_parenthetical_nickname(monkeypatch) -> None:
 
 
 def test_create_contact_serializes_methods(monkeypatch) -> None:
-    bridge = AppleContactsBridge(Path("/tmp/scripts"))
+    bridge = AppleContactsBridge(*UNUSED_HELPER)
     captured: dict[str, object] = {}
 
     def fake_run_script(script_name: str, *args: str) -> dict[str, object]:
@@ -289,7 +301,7 @@ def test_create_contact_serializes_methods(monkeypatch) -> None:
 
 
 def test_update_contact_supports_no_change_sentinel(monkeypatch) -> None:
-    bridge = AppleContactsBridge(Path("/tmp/scripts"))
+    bridge = AppleContactsBridge(*UNUSED_HELPER)
     calls: list[tuple[str, tuple[str, ...]]] = []
 
     def fake_run_script(script_name: str, *args: str) -> dict[str, object]:
@@ -325,35 +337,87 @@ def test_update_contact_supports_no_change_sentinel(monkeypatch) -> None:
 
 
 @pytest.mark.skipif(
-    sys.platform != "darwin" or shutil.which("osacompile") is None,
-    reason="osacompile is only available on macOS",
+    sys.platform != "darwin" or shutil.which("swiftc") is None,
+    reason="swiftc is only available on macOS with the Xcode tools",
 )
-def test_contacts_scripts_compile(tmp_path) -> None:
-    repo_root = Path(__file__).resolve().parents[1]
-    scripts_dir = repo_root / "src" / "apple_contacts_mcp" / "applescripts"
-    scripts = (
-        scripts_dir / "permission_check.applescript",
-        scripts_dir / "list_contacts.applescript",
-        scripts_dir / "search_contacts.applescript",
-        scripts_dir / "get_contact.applescript",
-        scripts_dir / "create_contact.applescript",
-        scripts_dir / "update_contact.applescript",
-        scripts_dir / "delete_contact.applescript",
+def test_contacts_helper_compiles() -> None:
+    helper_source = Path(__file__).resolve().parents[1] / "src" / "apple_contacts_mcp" / "contacts_bridge.swift"
+    completed = subprocess.run(
+        ["swiftc", "-typecheck", str(helper_source)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr or completed.stdout
+
+
+def test_run_script_calls_helper_with_command_name(monkeypatch, tmp_path) -> None:
+    bridge = ready_bridge(tmp_path)
+    seen: list[list[str]] = []
+
+    class FinishedProcess:
+        returncode = 0
+
+        def poll(self) -> int:
+            return 0
+
+    def fake_popen(command, *, stdout, stderr):
+        seen.append(command)
+        stdout.write(b'{"found": false}')
+        return FinishedProcess()
+
+    monkeypatch.setattr(contacts_bridge.subprocess, "Popen", fake_popen)
+
+    assert bridge._run_script("get_contact.applescript", "contact-1") == {"found": False}
+    assert seen == [[str(bridge.helper_binary), "get_contact", "contact-1"]]
+
+
+def test_ensure_helper_compiles_when_binary_is_missing_or_stale(monkeypatch, tmp_path) -> None:
+    source = tmp_path / "contacts_bridge.swift"
+    source.touch()
+    bridge = AppleContactsBridge(source, tmp_path / "build" / "apple-contacts-bridge")
+    calls: list[list[str]] = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        Path(command[-1]).touch()
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(contacts_bridge.subprocess, "run", fake_run)
+
+    bridge._ensure_helper()
+    bridge._ensure_helper()
+
+    assert calls == [["swiftc", "-O", str(source), "-o", str(bridge.helper_binary)]]
+
+
+def test_ensure_helper_reports_missing_source(tmp_path) -> None:
+    bridge = AppleContactsBridge(tmp_path / "missing.swift", tmp_path / "apple-contacts-bridge")
+
+    with pytest.raises(ContactsBridgeError) as exc_info:
+        bridge._ensure_helper()
+
+    assert exc_info.value.error_code == "HELPER_SOURCE_MISSING"
+
+
+def test_ensure_helper_reports_compile_failure(monkeypatch, tmp_path) -> None:
+    source = tmp_path / "contacts_bridge.swift"
+    source.touch()
+    bridge = AppleContactsBridge(source, tmp_path / "apple-contacts-bridge")
+    monkeypatch.setattr(
+        contacts_bridge.subprocess,
+        "run",
+        lambda command, **kwargs: subprocess.CompletedProcess(command, 1, "", "error: boom"),
     )
 
-    for script_path in scripts:
-        compiled_path = tmp_path / f"{script_path.stem}.scpt"
-        completed = subprocess.run(
-            ["osacompile", "-o", str(compiled_path), str(script_path)],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        assert completed.returncode == 0, completed.stderr or completed.stdout
+    with pytest.raises(ContactsBridgeError, match="boom") as exc_info:
+        bridge._ensure_helper()
+
+    assert exc_info.value.error_code == "HELPER_COMPILE_FAILED"
 
 
 def test_find_duplicates_groups_by_shared_email_and_name(monkeypatch) -> None:
-    bridge = AppleContactsBridge(Path("/tmp/scripts"))
+    bridge = AppleContactsBridge(*UNUSED_HELPER)
 
     def fake_run_script(script_name: str, *args: str) -> dict[str, object]:
         if script_name == "list_contacts.applescript":
@@ -397,7 +461,7 @@ def test_find_duplicates_groups_by_shared_email_and_name(monkeypatch) -> None:
 
 
 def test_find_duplicates_scans_past_first_thousand(monkeypatch) -> None:
-    bridge = AppleContactsBridge(Path("/tmp/scripts"))
+    bridge = AppleContactsBridge(*UNUSED_HELPER)
     directory = [contact_item(f"contact-{index}", name=f"Unique{index}") for index in range(1000)]
     directory.extend(
         [
@@ -421,7 +485,7 @@ def test_find_duplicates_scans_past_first_thousand(monkeypatch) -> None:
 
 
 def test_directory_scan_rejects_total_above_bound(monkeypatch) -> None:
-    bridge = AppleContactsBridge(Path("/tmp/scripts"))
+    bridge = AppleContactsBridge(*UNUSED_HELPER)
     monkeypatch.setattr(
         bridge,
         "_run_script",
@@ -435,7 +499,7 @@ def test_directory_scan_rejects_total_above_bound(monkeypatch) -> None:
 
 
 def test_directory_scan_rejects_short_page(monkeypatch) -> None:
-    bridge = AppleContactsBridge(Path("/tmp/scripts"))
+    bridge = AppleContactsBridge(*UNUSED_HELPER)
     monkeypatch.setattr(bridge, "_run_script", lambda *args: {"items": [], "total": 1})
 
     with pytest.raises(ContactsBridgeError) as exc_info:
@@ -445,7 +509,7 @@ def test_directory_scan_rejects_short_page(monkeypatch) -> None:
 
 
 def test_suggest_merge_candidates_filters_query(monkeypatch) -> None:
-    bridge = AppleContactsBridge(Path("/tmp/scripts"))
+    bridge = AppleContactsBridge(*UNUSED_HELPER)
 
     def fake_run_script(script_name: str, *args: str) -> dict[str, object]:
         if script_name == "list_contacts.applescript":
