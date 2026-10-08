@@ -1,11 +1,11 @@
 {
-  "name": "apple-contacts",
+  "name": "apple-mcps",
   "version": "1.0.5",
-  "description": "Apple Contacts on macOS through the Contacts framework (no AppleScript): search, read, create, update and delete contacts, find duplicates and resolve message recipients.",
+  "description": "Apple Contacts and Reminders on macOS through native frameworks (no AppleScript): search, read, create, update and delete contacts and reminders.",
   "author": {
-    "name": "Jonathan Reed (upstream); native helper by JaumeAP"
+    "name": "Jonathan Reed (upstream); native Contacts helper by JaumeAP"
   },
-  "homepage": "https://github.com/JaumeAP/Apple-MCPs/tree/claude-plugin/AppleContacts-MCP",
+  "homepage": "https://github.com/JaumeAP/Apple-MCPs/tree/claude-plugin",
   "repository": "https://github.com/JaumeAP/Apple-MCPs",
   "license": "MIT",
   "mcpServers": {
@@ -15,6 +15,13 @@
       "env": {
         "APPLE_CONTACTS_MCP_SAFETY_MODE": "full_access",
         "APPLE_CONTACTS_MCP_BACKUP_DIR": "~/contact-backups"
+      }
+    },
+    "apple-reminders": {
+      "command": "uv",
+      "args": ["run", "--directory", "${CLAUDE_PLUGIN_ROOT}/AppleReminders-MCP", "apple-reminders-mcp"],
+      "env": {
+        "APPLE_REMINDERS_MCP_SAFETY_MODE": "full_access"
       }
     }
   }

@@ -7,8 +7,8 @@
   },
   "plugins": [
     {
-      "name": "apple-contacts",
-      "description": "Apple Contacts on macOS through the Contacts framework (no AppleScript).",
+      "name": "apple-mcps",
+      "description": "Apple Contacts and Reminders on macOS through native frameworks (no AppleScript).",
       "source": "./",
       "category": "productivity"
     }
