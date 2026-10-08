@@ -430,3 +430,45 @@ def test_update_note_sets_title_after_body_update() -> None:
     source = (repo_root / "src" / "apple_notes_mcp" / "applescripts" / "update_note.applescript").read_text()
 
     assert source.index("set body of noteRef to my compose_note_body(noteBody, tagsCsv)") < source.index('if titleText is not "" then set name of noteRef to titleText')
+
+
+def test_delete_note_surfaces_script_error_reason(monkeypatch, tmp_path) -> None:
+    bridge = AppleNotesBridge(tmp_path)
+    monkeypatch.setattr(
+        bridge,
+        "_run_script",
+        lambda script_name, *args: {"deleted": False, "note_id": "note-1", "error": "Notes got an error: Can't get note id \"note-1\"."},
+    )
+
+    with pytest.raises(NotesBridgeError) as exc_info:
+        bridge.delete_note("note-1")
+
+    assert exc_info.value.error_code == "NOTE_NOT_FOUND"
+    assert "note-1" in exc_info.value.message
+
+
+def test_delete_note_without_error_reason_keeps_boolean_result(monkeypatch, tmp_path) -> None:
+    bridge = AppleNotesBridge(tmp_path)
+    monkeypatch.setattr(bridge, "_run_script", lambda script_name, *args: {"deleted": False, "note_id": "note-1"})
+
+    assert bridge.delete_note("note-1") is False
+
+
+def test_delete_note_script_reports_error_message() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    source = (repo_root / "src" / "apple_notes_mcp" / "applescripts" / "delete_note.applescript").read_text()
+
+    assert "on error errMsg" in source
+    assert 'quote & "error" & quote & ":" & my json_string(errMsg)' in source
+
+
+def test_list_notes_bulk_fetches_properties_per_folder() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    source = (repo_root / "src" / "apple_notes_mcp" / "applescripts" / "list_notes.applescript").read_text()
+    handler = source.split("on folder_notes_json(", 1)[1].split("end folder_notes_json", 1)[0]
+
+    for property_name in ("id", "name", "plaintext", "creation date", "modification date", "shared"):
+        assert f"{property_name} of every note of fld" in handler
+    assert "my folder_notes_json(accId, accName, fldId, fldName, fld)" in source
+    # Per-note reads remain only as the fallback path.
+    assert "my note_json(accId, accName, fldId, fldName, n)" in source

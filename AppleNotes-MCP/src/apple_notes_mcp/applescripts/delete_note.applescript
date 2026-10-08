@@ -4,8 +4,8 @@ on run argv
 		try
 			delete note id targetNoteId
 			return "{" & quote & "deleted" & quote & ":true," & quote & "note_id" & quote & ":" & my json_string(targetNoteId) & "}"
-		on error
-			return "{" & quote & "deleted" & quote & ":false," & quote & "note_id" & quote & ":" & my json_string(targetNoteId) & "}"
+		on error errMsg
+			return "{" & quote & "deleted" & quote & ":false," & quote & "note_id" & quote & ":" & my json_string(targetNoteId) & "," & quote & "error" & quote & ":" & my json_string(errMsg) & "}"
 		end try
 	end tell
 end run

@@ -172,6 +172,8 @@ class AppleNotesBridge:
         deleted = bool(payload.get("deleted", False))
         if deleted:
             self._body_html_cache.pop(note_id, None)
+        elif payload.get("error"):
+            raise self._map_script_error(str(payload["error"]))
         return deleted
 
     def create_folder(self, *, folder_name: str, account_name: str, parent_folder_id: str | None = None) -> FolderInfo:
