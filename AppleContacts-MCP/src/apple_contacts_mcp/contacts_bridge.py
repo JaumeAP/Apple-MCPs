@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import subprocess
 import tempfile
@@ -19,7 +20,11 @@ NO_CHANGE_SENTINEL = "__NOCHANGE__"
 SCRIPT_TIMEOUT_SECONDS = 30
 MAX_SCRIPT_OUTPUT_BYTES = 8 * 1024 * 1024
 MAX_CONTACTS_PER_REQUEST = 1000
+# Directory scans page internally; the helper reads the whole book on every call,
+# so larger pages mean fewer full enumerations.
+DIRECTORY_SCAN_PAGE_SIZE = 5000
 MAX_DIRECTORY_CONTACTS = 100_000
+HELPER_COMPILE_TIMEOUT_SECONDS = 300
 
 
 class ContactsBridgeError(Exception):
@@ -326,7 +331,7 @@ class AppleContactsBridge:
         while expected_total is None or offset < expected_total:
             payload = self._run_script(
                 "list_contacts.applescript",
-                str(MAX_CONTACTS_PER_REQUEST),
+                str(DIRECTORY_SCAN_PAGE_SIZE),
                 str(offset),
             )
             raw_total = payload.get("total")
@@ -360,7 +365,7 @@ class AppleContactsBridge:
                 )
             items = [self._normalize_summary(item) for item in raw_items if isinstance(item, dict)]
             remaining = expected_total - offset
-            expected_page_size = min(MAX_CONTACTS_PER_REQUEST, remaining)
+            expected_page_size = min(DIRECTORY_SCAN_PAGE_SIZE, remaining)
             if len(items) != expected_page_size:
                 raise ContactsBridgeError(
                     "INCOMPLETE_CONTACT_DIRECTORY",
@@ -371,13 +376,13 @@ class AppleContactsBridge:
             offset += len(items)
 
     def _run_script(self, script_name: str, *args: str) -> dict[str, object]:
-        self._ensure_helper()
+        helper = self._ensure_helper()
         command = script_name.removesuffix(".applescript")
 
         try:
             with tempfile.TemporaryFile() as stdout_file, tempfile.TemporaryFile() as stderr_file:
                 process = subprocess.Popen(
-                    [str(self.helper_binary), command, *args],
+                    [str(helper), command, *args],
                     stdout=stdout_file,
                     stderr=stderr_file,
                 )
@@ -415,7 +420,7 @@ class AppleContactsBridge:
         except OSError as exc:
             raise ContactsBridgeError(
                 "OSASCRIPT_UNAVAILABLE",
-                f"Could not run the Contacts helper '{self.helper_binary}': {exc}.",
+                f"Could not run the Contacts helper '{helper}': {exc}.",
                 "This server requires macOS with the compiled Contacts helper available.",
             ) from exc
         stdout_text = stdout.decode("utf-8", errors="replace")
@@ -445,36 +450,59 @@ class AppleContactsBridge:
             )
         return payload
 
-    def _ensure_helper(self) -> None:
-        if not self.helper_source.exists():
+    def _ensure_helper(self) -> Path:
+        """Return the compiled helper for the current source, compiling it if needed.
+
+        The binary name carries a hash of the source, so an existing binary is always
+        current. Compilation writes to a per-process temporary file and renames it into
+        place, so concurrent servers never run a half-written binary.
+        """
+        try:
+            source_bytes = self.helper_source.read_bytes()
+        except OSError as exc:
             raise ContactsBridgeError(
                 "HELPER_SOURCE_MISSING",
                 f"Missing native helper source at '{self.helper_source}'.",
                 "Restore contacts_bridge.swift and retry.",
-            )
-        if self.helper_binary.exists() and self.helper_binary.stat().st_mtime >= self.helper_source.stat().st_mtime:
-            return
-
-        self.helper_binary.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            completed = subprocess.run(
-                ["swiftc", "-O", str(self.helper_source), "-o", str(self.helper_binary)],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-        except OSError as exc:
-            raise ContactsBridgeError(
-                "SWIFTC_UNAVAILABLE",
-                f"Could not run 'swiftc': {exc}.",
-                "This server requires macOS with the Swift toolchain (swiftc) available.",
             ) from exc
-        if completed.returncode != 0:
-            raise ContactsBridgeError(
-                "HELPER_COMPILE_FAILED",
-                completed.stderr.strip() or completed.stdout.strip() or "Failed to compile the native helper.",
-                "Confirm Xcode command line tools and Swift are available, then retry.",
-            )
+        digest = hashlib.sha256(source_bytes).hexdigest()[:12]
+        binary = self.helper_binary.with_name(f"{self.helper_binary.name}-{digest}")
+        if binary.exists():
+            return binary
+
+        binary.parent.mkdir(parents=True, exist_ok=True)
+        temporary = binary.with_name(f"{binary.name}.{os.getpid()}.tmp")
+        try:
+            try:
+                completed = subprocess.run(
+                    ["swiftc", "-O", str(self.helper_source), "-o", str(temporary)],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=HELPER_COMPILE_TIMEOUT_SECONDS,
+                )
+            except OSError as exc:
+                raise ContactsBridgeError(
+                    "SWIFTC_UNAVAILABLE",
+                    f"Could not run 'swiftc': {exc}.",
+                    "This server requires macOS with the Swift toolchain (swiftc) available.",
+                ) from exc
+            except subprocess.TimeoutExpired as exc:
+                raise ContactsBridgeError(
+                    "HELPER_COMPILE_FAILED",
+                    f"Compiling the native helper exceeded the {HELPER_COMPILE_TIMEOUT_SECONDS}-second timeout.",
+                    "Confirm Xcode command line tools and Swift are available, then retry.",
+                ) from exc
+            if completed.returncode != 0:
+                raise ContactsBridgeError(
+                    "HELPER_COMPILE_FAILED",
+                    completed.stderr.strip() or completed.stdout.strip() or "Failed to compile the native helper.",
+                    "Confirm Xcode command line tools and Swift are available, then retry.",
+                )
+            os.replace(temporary, binary)
+        finally:
+            temporary.unlink(missing_ok=True)
+        return binary
 
     def _stop_process(self, process: subprocess.Popen[bytes]) -> None:
         with suppress(ProcessLookupError):
