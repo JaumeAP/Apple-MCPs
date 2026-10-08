@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import plistlib
 import re
 import subprocess
@@ -11,6 +13,8 @@ from typing import ClassVar
 
 from apple_system_mcp.config import load_settings
 from apple_system_mcp.models import AppRecord, BatteryStatus
+
+HELPER_COMPILE_TIMEOUT_SECONDS = 300
 
 
 @dataclass(frozen=True)
@@ -127,43 +131,62 @@ class SystemBridge:
         except subprocess.TimeoutExpired as exc:
             raise SystemBridgeError("COMMAND_TIMEOUT", f"Timed out while restarting {process_name}.", "Retry the request.") from exc
 
-    def _ensure_apps_helper(self) -> None:
-        if not self.apps_helper_source.exists():
+    def _ensure_apps_helper(self) -> Path:
+        """Return the compiled apps helper for the current source, compiling it if needed.
+
+        The binary name carries a hash of the source, so an existing binary is always
+        current. Compilation writes to a per-process temporary file and renames it into
+        place, so concurrent servers never run a half-written binary.
+        """
+        try:
+            source_bytes = self.apps_helper_source.read_bytes()
+        except OSError as exc:
             raise SystemBridgeError(
                 "HELPER_SOURCE_MISSING",
                 f"Missing native helper source at '{self.apps_helper_source}'.",
                 "Restore system_apps_bridge.swift and retry.",
-            )
-        if (
-            self.apps_helper_binary.exists()
-            and self.apps_helper_binary.stat().st_mtime >= self.apps_helper_source.stat().st_mtime
-        ):
-            return
-        self.apps_helper_binary.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            completed = subprocess.run(
-                ["swiftc", "-O", str(self.apps_helper_source), "-o", str(self.apps_helper_binary)],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-        except OSError as exc:
-            raise SystemBridgeError(
-                "SWIFTC_UNAVAILABLE",
-                f"Could not run 'swiftc': {exc}.",
-                "This server requires macOS with the Swift toolchain (swiftc) available.",
             ) from exc
-        if completed.returncode != 0:
-            raise SystemBridgeError(
-                "HELPER_COMPILE_FAILED",
-                completed.stderr.strip() or completed.stdout.strip() or "Failed to compile the native helper.",
-                "Confirm Xcode command line tools and Swift are available, then retry.",
-            )
+        digest = hashlib.sha256(source_bytes).hexdigest()[:12]
+        binary = self.apps_helper_binary.with_name(f"{self.apps_helper_binary.name}-{digest}")
+        if binary.exists():
+            return binary
+        binary.parent.mkdir(parents=True, exist_ok=True)
+        temporary = binary.with_name(f"{binary.name}.{os.getpid()}.tmp")
+        try:
+            try:
+                completed = subprocess.run(
+                    ["swiftc", "-O", str(self.apps_helper_source), "-o", str(temporary)],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=HELPER_COMPILE_TIMEOUT_SECONDS,
+                )
+            except OSError as exc:
+                raise SystemBridgeError(
+                    "SWIFTC_UNAVAILABLE",
+                    f"Could not run 'swiftc': {exc}.",
+                    "This server requires macOS with the Swift toolchain (swiftc) available.",
+                ) from exc
+            except subprocess.TimeoutExpired as exc:
+                raise SystemBridgeError(
+                    "HELPER_COMPILE_FAILED",
+                    f"Compiling the native helper exceeded the {HELPER_COMPILE_TIMEOUT_SECONDS}-second timeout.",
+                    "Confirm Xcode command line tools and Swift are available, then retry.",
+                ) from exc
+            if completed.returncode != 0:
+                raise SystemBridgeError(
+                    "HELPER_COMPILE_FAILED",
+                    completed.stderr.strip() or completed.stdout.strip() or "Failed to compile the native helper.",
+                    "Confirm Xcode command line tools and Swift are available, then retry.",
+                )
+            os.replace(temporary, binary)
+        finally:
+            temporary.unlink(missing_ok=True)
+        return binary
 
     def _run_apps_helper(self, *args: str) -> object:
         """Runs the NSWorkspace helper (system_apps_bridge.swift) and decodes its JSON."""
-        self._ensure_apps_helper()
-        raw = self._run(str(self.apps_helper_binary), *args)
+        raw = self._run(str(self._ensure_apps_helper()), *args)
         try:
             return json.loads(raw)
         except json.JSONDecodeError as exc:
