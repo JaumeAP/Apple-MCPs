@@ -130,8 +130,8 @@ func personJSON(_ contact: CNContact) -> [String: Any] {
     ]
 }
 
-func allContacts() -> [CNContact] {
-    let request = CNContactFetchRequest(keysToFetch: summaryKeys)
+func allContacts(keys: [CNKeyDescriptor] = summaryKeys) -> [CNContact] {
+    let request = CNContactFetchRequest(keysToFetch: keys)
     request.sortOrder = .userDefault
     var result: [CNContact] = []
     do {
@@ -151,34 +151,53 @@ func findContact(_ id: String, keys: [CNKeyDescriptor] = summaryKeys) -> CNConta
     }
 }
 
+// Writes to "<name>.<ext>", or "<name>-2.<ext>", "<name>-3.<ext>"... when that file
+// already exists, so two backups never overwrite each other.
+func writeNewFile(_ data: Data, dir: URL, name: String, ext: String) throws {
+    var suffix = 1
+    while true {
+        let file = dir.appendingPathComponent(suffix == 1 ? name : "\(name)-\(suffix)").appendingPathExtension(ext)
+        do {
+            try data.write(to: file, options: .withoutOverwriting)
+            return
+        } catch where FileManager.default.fileExists(atPath: file.path) {
+            suffix += 1
+        }
+    }
+}
+
 func backup(_ contact: CNContact) {
     guard let rawDir = ProcessInfo.processInfo.environment["APPLE_CONTACTS_MCP_BACKUP_DIR"], !rawDir.isEmpty else {
         return
     }
     let dir = URL(fileURLWithPath: (rawDir as NSString).expandingTildeInPath)
-    let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    let stamp = formatter.string(from: Date()).replacingOccurrences(of: ":", with: "-")
     let safeId = contact.identifier.map { $0.isLetter || $0.isNumber || $0 == "-" ? $0 : "_" }
-    let base = dir.appendingPathComponent("\(stamp)_\(String(safeId))")
+    let name = "\(stamp)_\(String(safeId))"
     do {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let vCardKeys = [CNContactVCardSerialization.descriptorForRequiredKeys()]
         if let full = try? store.unifiedContact(withIdentifier: contact.identifier, keysToFetch: vCardKeys),
            let data = try? CNContactVCardSerialization.data(with: [full]) {
-            try data.write(to: base.appendingPathExtension("vcf"))
+            try writeNewFile(data, dir: dir, name: name, ext: "vcf")
         } else {
             let data = try JSONSerialization.data(withJSONObject: personJSON(contact), options: [.prettyPrinted, .sortedKeys])
-            try data.write(to: base.appendingPathExtension("json"))
+            try writeNewFile(data, dir: dir, name: name, ext: "json")
         }
     } catch {
         fail("Backup failed, nothing was changed: \(error.localizedDescription)")
     }
 }
 
+let noteUnavailableMessage = "Notes cannot be written: macOS reserves the note field for apps with a special entitlement. Leave note empty."
+
 func setNote(_ note: String, on contact: CNMutableContact) {
     // Setting a note needs the same entitlement as reading one. Report it plainly
     // instead of letting the framework throw an Objective-C exception.
     guard contact.isKeyAvailable(CNContactNoteKey) else {
-        fail("Notes cannot be written: macOS reserves the note field for apps with a special entitlement. Leave note empty.")
+        fail(noteUnavailableMessage)
     }
     contact.note = note
 }
@@ -207,7 +226,7 @@ requireAccess()
 
 switch command {
 case "permission_check":
-    emit(["ok": true, "count": allContacts().count])
+    emit(["ok": true, "count": allContacts(keys: [CNContactIdentifierKey as CNKeyDescriptor]).count])
 
 case "list_contacts":
     let limit = max(0, intArgument(args, 0, "LIMIT"))
@@ -244,8 +263,9 @@ case "create_contact":
     contact.emailAddresses = methods(argument(args, 4)).map {
         CNLabeledValue(label: storedLabel($0.label), value: $0.value as NSString)
     }
-    let note = argument(args, 5)
-    if !note.isEmpty { setNote(note, on: contact) }
+    // A fresh CNMutableContact reports the note key as available, so setNote's guard
+    // would pass and the save would fail on the missing entitlement. Refuse up front.
+    if !argument(args, 5).isEmpty { fail(noteUnavailableMessage) }
     let request = CNSaveRequest()
     request.add(contact, toContainerWithIdentifier: nil)
     execute(request)
@@ -289,7 +309,9 @@ case "delete_contact":
     let request = CNSaveRequest()
     request.delete(original.mutableCopy() as! CNMutableContact)
     execute(request)
-    emit(["contact_id": id, "deleted": true])
+    // Deleting a unified contact can leave some of its linked cards behind, so report
+    // what the store holds now rather than assuming the save removed everything.
+    emit(["contact_id": id, "deleted": findContact(id) == nil])
 
 default:
     fail("Unknown command '\(command)'.")
