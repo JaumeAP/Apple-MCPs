@@ -61,16 +61,35 @@ def test_show_notification_preserves_optional_subtitle(monkeypatch) -> None:
     assert captured[0][-4:] == ("--", "Body", "Title", "")
 
 
-def ready_bridge(tmp_path):
-    """A bridge whose apps helper binary is newer than its source, so nothing is compiled."""
-    import os
+def hashed_binary(bridge):
+    import hashlib
 
+    digest = hashlib.sha256(bridge.apps_helper_source.read_bytes()).hexdigest()[:12]
+    return bridge.apps_helper_binary.with_name(f"{bridge.apps_helper_binary.name}-{digest}")
+
+
+def ready_bridge(tmp_path):
+    """A bridge whose hashed apps helper binary already exists, so nothing is compiled."""
     source = tmp_path / "system_apps_bridge.swift"
-    binary = tmp_path / "apple-system-apps-bridge"
     source.touch()
-    binary.touch()
-    os.utime(binary, (source.stat().st_mtime + 1, source.stat().st_mtime + 1))
-    return SystemBridge(source, binary)
+    bridge = SystemBridge(source, tmp_path / "apple-system-apps-bridge")
+    hashed_binary(bridge).touch()
+    return bridge
+
+
+def fake_swiftc(compiles, returncode=0):
+    import subprocess
+    from pathlib import Path
+
+    from apple_system_mcp import system_bridge
+
+    def fake_compile(command, **kwargs):
+        compiles.append(command)
+        assert kwargs["timeout"] == system_bridge.HELPER_COMPILE_TIMEOUT_SECONDS
+        Path(command[-1]).touch()
+        return subprocess.CompletedProcess(command, returncode, "", "error: boom" if returncode else "")
+
+    return fake_compile
 
 
 def test_target_application_uses_native_helper_commands(monkeypatch, tmp_path) -> None:
@@ -118,28 +137,101 @@ def test_running_apps_rejects_invalid_helper_output(monkeypatch, tmp_path) -> No
         raise AssertionError("Expected SystemBridgeError")
 
 
-def test_apps_helper_compiles_once_when_missing(monkeypatch, tmp_path) -> None:
-    import subprocess
+def test_apps_helper_compiles_once_to_hashed_name(monkeypatch, tmp_path) -> None:
+    import os
+
+    from apple_system_mcp import system_bridge
+
+    source = tmp_path / "system_apps_bridge.swift"
+    source.write_text("// v1")
+    bridge = SystemBridge(source, tmp_path / "build" / "apple-system-apps-bridge")
+    compiles = []
+    monkeypatch.setattr(system_bridge.subprocess, "run", fake_swiftc(compiles))
+
+    first = bridge._ensure_apps_helper()
+    second = bridge._ensure_apps_helper()
+
+    expected = hashed_binary(bridge)
+    temporary = expected.with_name(f"{expected.name}.{os.getpid()}.tmp")
+    assert first == second == expected
+    assert expected.exists() and not temporary.exists()
+    assert compiles == [["swiftc", "-O", str(source), "-o", str(temporary)]]
+
+
+def test_apps_helper_reuses_existing_hashed_binary(monkeypatch, tmp_path) -> None:
+    from apple_system_mcp import system_bridge
+
+    bridge = ready_bridge(tmp_path)
+
+    def unexpected_compile(command, **kwargs):
+        raise AssertionError("swiftc must not run when the hashed binary exists")
+
+    monkeypatch.setattr(system_bridge.subprocess, "run", unexpected_compile)
+
+    assert bridge._ensure_apps_helper() == hashed_binary(bridge)
+
+
+def test_apps_helper_recompiles_changed_source_under_new_name(monkeypatch, tmp_path) -> None:
+    from apple_system_mcp import system_bridge
+
+    source = tmp_path / "system_apps_bridge.swift"
+    source.write_text("// v1")
+    bridge = SystemBridge(source, tmp_path / "apple-system-apps-bridge")
+    compiles = []
+    monkeypatch.setattr(system_bridge.subprocess, "run", fake_swiftc(compiles))
+
+    old_binary = bridge._ensure_apps_helper()
+    source.write_text("// v2")
+    new_binary = bridge._ensure_apps_helper()
+
+    assert old_binary != new_binary
+    assert old_binary.exists() and new_binary.exists()
+    assert len(compiles) == 2
+
+
+def test_apps_helper_removes_temporary_file_on_failure(monkeypatch, tmp_path) -> None:
     from pathlib import Path
 
     from apple_system_mcp import system_bridge
 
     source = tmp_path / "system_apps_bridge.swift"
     source.touch()
-    bridge = SystemBridge(source, tmp_path / "build" / "apple-system-apps-bridge")
+    bridge = SystemBridge(source, tmp_path / "apple-system-apps-bridge")
     compiles = []
+    monkeypatch.setattr(system_bridge.subprocess, "run", fake_swiftc(compiles, returncode=1))
 
-    def fake_compile(command, **kwargs):
-        compiles.append(command)
-        Path(command[-1]).touch()
-        return subprocess.CompletedProcess(command, 0, "", "")
+    try:
+        bridge._ensure_apps_helper()
+    except SystemBridgeError as exc:
+        assert exc.error_code == "HELPER_COMPILE_FAILED"
+        assert "boom" in exc.message
+    else:
+        raise AssertionError("Expected SystemBridgeError")
 
-    monkeypatch.setattr(system_bridge.subprocess, "run", fake_compile)
+    assert not Path(compiles[0][-1]).exists()
+    assert not hashed_binary(bridge).exists()
 
-    bridge._ensure_apps_helper()
-    bridge._ensure_apps_helper()
 
-    assert compiles == [["swiftc", "-O", str(source), "-o", str(bridge.apps_helper_binary)]]
+def test_apps_helper_maps_compile_timeout(monkeypatch, tmp_path) -> None:
+    import subprocess
+
+    from apple_system_mcp import system_bridge
+
+    source = tmp_path / "system_apps_bridge.swift"
+    source.touch()
+    bridge = SystemBridge(source, tmp_path / "apple-system-apps-bridge")
+
+    def slow_compile(command, **kwargs):
+        raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+
+    monkeypatch.setattr(system_bridge.subprocess, "run", slow_compile)
+
+    try:
+        bridge._ensure_apps_helper()
+    except SystemBridgeError as exc:
+        assert exc.error_code == "HELPER_COMPILE_FAILED"
+    else:
+        raise AssertionError("Expected SystemBridgeError")
 
 
 def test_apps_helper_source_compiles() -> None:
