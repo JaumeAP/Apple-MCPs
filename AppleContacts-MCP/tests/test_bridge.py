@@ -1,3 +1,4 @@
+import hashlib
 import os
 import shutil
 import subprocess
@@ -13,14 +14,18 @@ from apple_contacts_mcp.contacts_bridge import AppleContactsBridge, ContactsBrid
 UNUSED_HELPER = (Path("/tmp/contacts_bridge.swift"), Path("/tmp/apple-contacts-bridge"))
 
 
+def hashed_binary(bridge: AppleContactsBridge) -> Path:
+    digest = hashlib.sha256(bridge.helper_source.read_bytes()).hexdigest()[:12]
+    return bridge.helper_binary.with_name(f"{bridge.helper_binary.name}-{digest}")
+
+
 def ready_bridge(tmp_path: Path) -> AppleContactsBridge:
-    """A bridge whose helper binary is newer than its source, so nothing is compiled."""
+    """A bridge whose hashed helper binary already exists, so nothing is compiled."""
     source = tmp_path / "contacts_bridge.swift"
-    binary = tmp_path / "apple-contacts-bridge"
     source.touch()
-    binary.touch()
-    os.utime(binary, (source.stat().st_mtime + 1, source.stat().st_mtime + 1))
-    return AppleContactsBridge(source, binary)
+    bridge = AppleContactsBridge(source, tmp_path / "apple-contacts-bridge")
+    hashed_binary(bridge).touch()
+    return bridge
 
 
 def contact_item(
@@ -85,6 +90,7 @@ def test_search_contacts_matches_phone_number(monkeypatch) -> None:
 )
 def test_search_contacts_scans_past_first_thousand(monkeypatch, query, field, value) -> None:
     bridge = AppleContactsBridge(*UNUSED_HELPER)
+    monkeypatch.setattr(contacts_bridge, "DIRECTORY_SCAN_PAGE_SIZE", 1000)
     directory = [contact_item(f"contact-{index}") for index in range(1001)]
     directory.append(
         contact_item(
@@ -369,26 +375,92 @@ def test_run_script_calls_helper_with_command_name(monkeypatch, tmp_path) -> Non
     monkeypatch.setattr(contacts_bridge.subprocess, "Popen", fake_popen)
 
     assert bridge._run_script("get_contact.applescript", "contact-1") == {"found": False}
-    assert seen == [[str(bridge.helper_binary), "get_contact", "contact-1"]]
+    assert seen == [[str(hashed_binary(bridge)), "get_contact", "contact-1"]]
 
 
-def test_ensure_helper_compiles_when_binary_is_missing_or_stale(monkeypatch, tmp_path) -> None:
-    source = tmp_path / "contacts_bridge.swift"
-    source.touch()
-    bridge = AppleContactsBridge(source, tmp_path / "build" / "apple-contacts-bridge")
-    calls: list[list[str]] = []
-
+def fake_swiftc(calls: list[list[str]], returncode: int = 0):
     def fake_run(command, **kwargs):
         calls.append(command)
+        assert kwargs["timeout"] == contacts_bridge.HELPER_COMPILE_TIMEOUT_SECONDS
         Path(command[-1]).touch()
-        return subprocess.CompletedProcess(command, 0, "", "")
+        return subprocess.CompletedProcess(command, returncode, "", "error: boom" if returncode else "")
 
-    monkeypatch.setattr(contacts_bridge.subprocess, "run", fake_run)
+    return fake_run
 
-    bridge._ensure_helper()
-    bridge._ensure_helper()
 
-    assert calls == [["swiftc", "-O", str(source), "-o", str(bridge.helper_binary)]]
+def test_ensure_helper_compiles_once_to_hashed_name(monkeypatch, tmp_path) -> None:
+    source = tmp_path / "contacts_bridge.swift"
+    source.write_text("// v1")
+    bridge = AppleContactsBridge(source, tmp_path / "build" / "apple-contacts-bridge")
+    calls: list[list[str]] = []
+    monkeypatch.setattr(contacts_bridge.subprocess, "run", fake_swiftc(calls))
+
+    first = bridge._ensure_helper()
+    second = bridge._ensure_helper()
+
+    expected = hashed_binary(bridge)
+    temporary = expected.with_name(f"{expected.name}.{os.getpid()}.tmp")
+    assert first == second == expected
+    assert expected.exists() and not temporary.exists()
+    assert calls == [["swiftc", "-O", str(source), "-o", str(temporary)]]
+
+
+def test_ensure_helper_reuses_existing_hashed_binary(monkeypatch, tmp_path) -> None:
+    bridge = ready_bridge(tmp_path)
+
+    def unexpected_run(command, **kwargs):
+        raise AssertionError("swiftc must not run when the hashed binary exists")
+
+    monkeypatch.setattr(contacts_bridge.subprocess, "run", unexpected_run)
+
+    assert bridge._ensure_helper() == hashed_binary(bridge)
+
+
+def test_ensure_helper_recompiles_changed_source_under_new_name(monkeypatch, tmp_path) -> None:
+    source = tmp_path / "contacts_bridge.swift"
+    source.write_text("// v1")
+    bridge = AppleContactsBridge(source, tmp_path / "apple-contacts-bridge")
+    calls: list[list[str]] = []
+    monkeypatch.setattr(contacts_bridge.subprocess, "run", fake_swiftc(calls))
+
+    old_binary = bridge._ensure_helper()
+    source.write_text("// v2")
+    new_binary = bridge._ensure_helper()
+
+    assert old_binary != new_binary
+    assert old_binary.exists() and new_binary.exists()
+    assert len(calls) == 2
+
+
+def test_ensure_helper_removes_temporary_file_on_failure(monkeypatch, tmp_path) -> None:
+    source = tmp_path / "contacts_bridge.swift"
+    source.touch()
+    bridge = AppleContactsBridge(source, tmp_path / "apple-contacts-bridge")
+    calls: list[list[str]] = []
+    monkeypatch.setattr(contacts_bridge.subprocess, "run", fake_swiftc(calls, returncode=1))
+
+    with pytest.raises(ContactsBridgeError, match="boom") as exc_info:
+        bridge._ensure_helper()
+
+    assert exc_info.value.error_code == "HELPER_COMPILE_FAILED"
+    assert not Path(calls[0][-1]).exists()
+    assert not hashed_binary(bridge).exists()
+
+
+def test_ensure_helper_maps_compile_timeout(monkeypatch, tmp_path) -> None:
+    source = tmp_path / "contacts_bridge.swift"
+    source.touch()
+    bridge = AppleContactsBridge(source, tmp_path / "apple-contacts-bridge")
+
+    def slow_run(command, **kwargs):
+        raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+
+    monkeypatch.setattr(contacts_bridge.subprocess, "run", slow_run)
+
+    with pytest.raises(ContactsBridgeError, match="timeout") as exc_info:
+        bridge._ensure_helper()
+
+    assert exc_info.value.error_code == "HELPER_COMPILE_FAILED"
 
 
 def test_ensure_helper_reports_missing_source(tmp_path) -> None:
@@ -482,6 +554,22 @@ def test_find_duplicates_scans_past_first_thousand(monkeypatch) -> None:
         {contact.contact_id for contact in group.contacts} == {"contact-late-1", "contact-late-2"}
         for group in groups
     )
+
+
+def test_directory_scan_reads_large_pages(monkeypatch) -> None:
+    bridge = AppleContactsBridge(*UNUSED_HELPER)
+    directory = [contact_item(f"contact-{index}") for index in range(1500)]
+    calls: list[tuple[str, ...]] = []
+
+    def fake_run_script(script_name: str, *args: str) -> dict[str, object]:
+        calls.append(args)
+        limit, offset = map(int, args)
+        return {"items": directory[offset : offset + limit], "total": len(directory)}
+
+    monkeypatch.setattr(bridge, "_run_script", fake_run_script)
+
+    assert len(list(bridge._iter_all_contacts())) == 1500
+    assert calls == [(str(contacts_bridge.DIRECTORY_SCAN_PAGE_SIZE), "0")]
 
 
 def test_directory_scan_rejects_total_above_bound(monkeypatch) -> None:

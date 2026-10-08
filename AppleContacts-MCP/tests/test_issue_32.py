@@ -76,7 +76,7 @@ def install_finished_process(monkeypatch, output: str) -> None:
         return FinishedProcess()
 
     monkeypatch.setattr("apple_contacts_mcp.contacts_bridge.subprocess.Popen", fake_popen)
-    monkeypatch.setattr(AppleContactsBridge, "_ensure_helper", lambda self: None)
+    monkeypatch.setattr(AppleContactsBridge, "_ensure_helper", lambda self: self.helper_binary)
 
 
 @pytest.mark.parametrize("control_code", range(32))
