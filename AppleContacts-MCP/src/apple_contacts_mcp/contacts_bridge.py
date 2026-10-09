@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import subprocess
 import tempfile
@@ -19,7 +20,11 @@ NO_CHANGE_SENTINEL = "__NOCHANGE__"
 SCRIPT_TIMEOUT_SECONDS = 30
 MAX_SCRIPT_OUTPUT_BYTES = 8 * 1024 * 1024
 MAX_CONTACTS_PER_REQUEST = 1000
+# Directory scans page internally; the helper reads the whole book on every call,
+# so larger pages mean fewer full enumerations.
+DIRECTORY_SCAN_PAGE_SIZE = 5000
 MAX_DIRECTORY_CONTACTS = 100_000
+HELPER_COMPILE_TIMEOUT_SECONDS = 300
 
 
 class ContactsBridgeError(Exception):
@@ -31,8 +36,16 @@ class ContactsBridgeError(Exception):
 
 
 class AppleContactsBridge:
-    def __init__(self, scripts_dir: Path) -> None:
-        self.scripts_dir = scripts_dir
+    """Runs the native Contacts helper (contacts_bridge.swift) instead of AppleScript.
+
+    Callers still name operations after the former AppleScript files
+    ("get_contact.applescript"); the suffix is dropped to form the helper command,
+    and the helper answers with the same JSON the scripts did.
+    """
+
+    def __init__(self, helper_source: Path, helper_binary: Path) -> None:
+        self.helper_source = helper_source
+        self.helper_binary = helper_binary
 
     def permission_diagnostic(self) -> tuple[bool, ContactsBridgeError | None]:
         try:
@@ -58,8 +71,8 @@ class AppleContactsBridge:
         if not isinstance(raw_contact, dict):
             raise ContactsBridgeError(
                 "INVALID_SCRIPT_OUTPUT",
-                "The get_contact AppleScript did not return a contact object.",
-                "Inspect the AppleScript output and try again.",
+                "The get_contact helper command did not return a contact object.",
+                "Inspect the Contacts helper output and try again.",
             )
         return self._normalize_detail(raw_contact)
 
@@ -318,15 +331,15 @@ class AppleContactsBridge:
         while expected_total is None or offset < expected_total:
             payload = self._run_script(
                 "list_contacts.applescript",
-                str(MAX_CONTACTS_PER_REQUEST),
+                str(DIRECTORY_SCAN_PAGE_SIZE),
                 str(offset),
             )
             raw_total = payload.get("total")
             if not isinstance(raw_total, int) or isinstance(raw_total, bool) or raw_total < 0:
                 raise ContactsBridgeError(
                     "INVALID_SCRIPT_OUTPUT",
-                    "The list_contacts AppleScript did not return a valid directory total.",
-                    "Inspect the AppleScript output and try again.",
+                    "The list_contacts helper command did not return a valid directory total.",
+                    "Inspect the Contacts helper output and try again.",
                 )
             if raw_total > MAX_DIRECTORY_CONTACTS:
                 raise ContactsBridgeError(
@@ -347,12 +360,12 @@ class AppleContactsBridge:
             if not isinstance(raw_items, list):
                 raise ContactsBridgeError(
                     "INVALID_SCRIPT_OUTPUT",
-                    "The list_contacts AppleScript did not return an items array.",
-                    "Inspect the AppleScript output and try again.",
+                    "The list_contacts helper command did not return an items array.",
+                    "Inspect the Contacts helper output and try again.",
                 )
             items = [self._normalize_summary(item) for item in raw_items if isinstance(item, dict)]
             remaining = expected_total - offset
-            expected_page_size = min(MAX_CONTACTS_PER_REQUEST, remaining)
+            expected_page_size = min(DIRECTORY_SCAN_PAGE_SIZE, remaining)
             if len(items) != expected_page_size:
                 raise ContactsBridgeError(
                     "INCOMPLETE_CONTACT_DIRECTORY",
@@ -363,18 +376,13 @@ class AppleContactsBridge:
             offset += len(items)
 
     def _run_script(self, script_name: str, *args: str) -> dict[str, object]:
-        script_path = self.scripts_dir / script_name
-        if not script_path.exists():
-            raise ContactsBridgeError(
-                "SCRIPT_NOT_FOUND",
-                f"Missing AppleScript file '{script_name}'.",
-                "Restore the AppleScript file and try again.",
-            )
+        helper = self._ensure_helper()
+        command = script_name.removesuffix(".applescript")
 
         try:
             with tempfile.TemporaryFile() as stdout_file, tempfile.TemporaryFile() as stderr_file:
                 process = subprocess.Popen(
-                    ["osascript", str(script_path), *args],
+                    [str(helper), command, *args],
                     stdout=stdout_file,
                     stderr=stderr_file,
                 )
@@ -385,14 +393,14 @@ class AppleContactsBridge:
                         self._stop_process(process)
                         raise ContactsBridgeError(
                             "APPLESCRIPT_TIMEOUT",
-                            f"AppleScript exceeded the {SCRIPT_TIMEOUT_SECONDS}-second timeout.",
-                            "Ensure Contacts.app is responsive and try again.",
+                            f"The Contacts helper exceeded the {SCRIPT_TIMEOUT_SECONDS}-second timeout.",
+                            "Check for a pending Contacts permission prompt and try again.",
                         )
                     if stdout_file.tell() > MAX_SCRIPT_OUTPUT_BYTES or stderr_file.tell() > MAX_SCRIPT_OUTPUT_BYTES:
                         self._stop_process(process)
                         raise ContactsBridgeError(
                             "APPLESCRIPT_OUTPUT_TOO_LARGE",
-                            "AppleScript output exceeded the allowed size.",
+                            "Contacts helper output exceeded the allowed size.",
                             "Request fewer contacts and try again.",
                         )
                     with suppress(subprocess.TimeoutExpired):
@@ -405,15 +413,15 @@ class AppleContactsBridge:
                 if len(stdout) > MAX_SCRIPT_OUTPUT_BYTES or len(stderr) > MAX_SCRIPT_OUTPUT_BYTES:
                     raise ContactsBridgeError(
                         "APPLESCRIPT_OUTPUT_TOO_LARGE",
-                        "AppleScript output exceeded the allowed size.",
+                        "Contacts helper output exceeded the allowed size.",
                         "Request fewer contacts and try again.",
                     )
                 returncode = process.returncode
         except OSError as exc:
             raise ContactsBridgeError(
                 "OSASCRIPT_UNAVAILABLE",
-                f"Could not run 'osascript': {exc}.",
-                "This server requires macOS with osascript available.",
+                f"Could not run the Contacts helper '{helper}': {exc}.",
+                "This server requires macOS with the compiled Contacts helper available.",
             ) from exc
         stdout_text = stdout.decode("utf-8", errors="replace")
         stderr_text = stderr.decode("utf-8", errors="replace")
@@ -431,16 +439,70 @@ class AppleContactsBridge:
         except json.JSONDecodeError as exc:
             raise ContactsBridgeError(
                 "INVALID_SCRIPT_OUTPUT",
-                f"AppleScript returned invalid JSON: {exc.msg}.",
-                "Inspect the AppleScript output and ensure it returns valid JSON.",
+                f"The Contacts helper returned invalid JSON: {exc.msg}.",
+                "Inspect the Contacts helper output and ensure it returns valid JSON.",
             ) from exc
         if not isinstance(payload, dict):
             raise ContactsBridgeError(
                 "INVALID_SCRIPT_OUTPUT",
-                "AppleScript output must decode to a JSON object.",
-                "Inspect the AppleScript output and ensure it returns an object.",
+                "Contacts helper output must decode to a JSON object.",
+                "Inspect the Contacts helper output and ensure it returns an object.",
             )
         return payload
+
+    def _ensure_helper(self) -> Path:
+        """Return the compiled helper for the current source, compiling it if needed.
+
+        The binary name carries a hash of the source, so an existing binary is always
+        current. Compilation writes to a per-process temporary file and renames it into
+        place, so concurrent servers never run a half-written binary.
+        """
+        try:
+            source_bytes = self.helper_source.read_bytes()
+        except OSError as exc:
+            raise ContactsBridgeError(
+                "HELPER_SOURCE_MISSING",
+                f"Missing native helper source at '{self.helper_source}'.",
+                "Restore contacts_bridge.swift and retry.",
+            ) from exc
+        digest = hashlib.sha256(source_bytes).hexdigest()[:12]
+        binary = self.helper_binary.with_name(f"{self.helper_binary.name}-{digest}")
+        if binary.exists():
+            return binary
+
+        binary.parent.mkdir(parents=True, exist_ok=True)
+        temporary = binary.with_name(f"{binary.name}.{os.getpid()}.tmp")
+        try:
+            try:
+                completed = subprocess.run(
+                    ["swiftc", "-O", str(self.helper_source), "-o", str(temporary)],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=HELPER_COMPILE_TIMEOUT_SECONDS,
+                )
+            except OSError as exc:
+                raise ContactsBridgeError(
+                    "SWIFTC_UNAVAILABLE",
+                    f"Could not run 'swiftc': {exc}.",
+                    "This server requires macOS with the Swift toolchain (swiftc) available.",
+                ) from exc
+            except subprocess.TimeoutExpired as exc:
+                raise ContactsBridgeError(
+                    "HELPER_COMPILE_FAILED",
+                    f"Compiling the native helper exceeded the {HELPER_COMPILE_TIMEOUT_SECONDS}-second timeout.",
+                    "Confirm Xcode command line tools and Swift are available, then retry.",
+                ) from exc
+            if completed.returncode != 0:
+                raise ContactsBridgeError(
+                    "HELPER_COMPILE_FAILED",
+                    completed.stderr.strip() or completed.stdout.strip() or "Failed to compile the native helper.",
+                    "Confirm Xcode command line tools and Swift are available, then retry.",
+                )
+            os.replace(temporary, binary)
+        finally:
+            temporary.unlink(missing_ok=True)
+        return binary
 
     def _stop_process(self, process: subprocess.Popen[bytes]) -> None:
         with suppress(ProcessLookupError):
@@ -470,8 +532,8 @@ class AppleContactsBridge:
             return ContactsBridgeError("CONTACT_NOT_FOUND", error_text, "Search contacts first to discover a valid contact id.")
         return ContactsBridgeError(
             "APPLESCRIPT_EXECUTION_FAILED",
-            error_text or "AppleScript execution failed.",
-            "Inspect Contacts.app state and the AppleScript file, then retry.",
+            error_text or "The Contacts helper failed.",
+            "Read the error message, fix the request and retry.",
         )
 
     def _normalize_summary(self, raw_contact: dict[str, object]) -> ContactSummary:
@@ -613,4 +675,5 @@ class AppleContactsBridge:
 
 
 def build_bridge() -> AppleContactsBridge:
-    return AppleContactsBridge(load_settings().scripts_dir)
+    settings = load_settings()
+    return AppleContactsBridge(settings.helper_source, settings.helper_binary)

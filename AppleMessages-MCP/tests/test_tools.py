@@ -1,4 +1,6 @@
 import asyncio
+import os
+from pathlib import Path
 
 from apple_messages_mcp import tools
 from apple_messages_mcp.config import load_settings
@@ -127,17 +129,66 @@ def test_messages_reply_in_group_conversation_returns_chat_id(monkeypatch) -> No
     assert result.recipient is None
 
 
-def test_messages_send_attachment_accepts_optional_text(monkeypatch) -> None:
+def test_messages_send_attachment_accepts_optional_text(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("APPLE_MESSAGES_MCP_SAFETY_MODE", "full_access")
+    monkeypatch.setenv("APPLE_MESSAGES_MCP_ALLOWED_ATTACHMENT_ROOTS", str(tmp_path))
     load_settings.cache_clear()
     monkeypatch.setattr(tools, "_db_bridge", lambda: FakeDBBridge())
     monkeypatch.setattr(tools, "_automation_bridge", lambda: FakeAutomationBridge())
+    attachment = tmp_path / "test.png"
+    attachment.write_bytes(b"png")
 
-    result = tools.messages_send_attachment("+15551234567", "/tmp/test.png")
+    result = tools.messages_send_attachment("+15551234567", str(attachment))
 
     assert result.ok is True
-    assert result.file_path == "/tmp/test.png"
+    assert result.file_path == str(attachment.resolve())
     assert result.text is None
+
+
+def test_messages_send_attachment_rejects_path_outside_allowed_roots(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("APPLE_MESSAGES_MCP_SAFETY_MODE", "full_access")
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    monkeypatch.setenv("APPLE_MESSAGES_MCP_ALLOWED_ATTACHMENT_ROOTS", str(allowed))
+    load_settings.cache_clear()
+    monkeypatch.setattr(tools, "_automation_bridge", lambda: FakeAutomationBridge())
+    outside = tmp_path / "secret.txt"
+    outside.write_text("secret")
+
+    result = tools.messages_send_attachment("+15551234567", str(outside))
+
+    assert result.ok is False
+    assert result.error.error_code == "PATH_NOT_ALLOWED"
+
+
+def test_messages_send_attachment_rejects_symlink_escaping_allowed_root(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("APPLE_MESSAGES_MCP_SAFETY_MODE", "full_access")
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    monkeypatch.setenv("APPLE_MESSAGES_MCP_ALLOWED_ATTACHMENT_ROOTS", str(allowed))
+    load_settings.cache_clear()
+    monkeypatch.setattr(tools, "_automation_bridge", lambda: FakeAutomationBridge())
+    outside = tmp_path / "secret.txt"
+    outside.write_text("secret")
+    link = allowed / "innocent.txt"
+    link.symlink_to(outside)
+
+    result = tools.messages_send_attachment("+15551234567", str(link))
+
+    assert result.ok is False
+    assert result.error.error_code == "PATH_NOT_ALLOWED"
+
+
+def test_attachment_roots_default_and_pathsep_parsing(monkeypatch) -> None:
+    monkeypatch.delenv("APPLE_MESSAGES_MCP_ALLOWED_ATTACHMENT_ROOTS", raising=False)
+    load_settings.cache_clear()
+    home = Path.home()
+    assert load_settings().allowed_attachment_roots == (home / "Downloads", home / "Desktop", home / "Documents")
+
+    monkeypatch.setenv("APPLE_MESSAGES_MCP_ALLOWED_ATTACHMENT_ROOTS", os.pathsep.join(["/a", "", "~/b"]))
+    load_settings.cache_clear()
+    assert load_settings().allowed_attachment_roots == (Path("/a"), home / "b")
+    load_settings.cache_clear()
 
 
 def test_messages_health_surfaces_permission_errors(monkeypatch) -> None:

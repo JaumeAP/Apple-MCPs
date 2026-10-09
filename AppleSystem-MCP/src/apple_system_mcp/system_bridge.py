@@ -1,13 +1,20 @@
 from __future__ import annotations
 
+import hashlib
+import json
+import os
 import plistlib
 import re
 import subprocess
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import ClassVar
 
+from apple_system_mcp.config import load_settings
 from apple_system_mcp.models import AppRecord, BatteryStatus
+
+HELPER_COMPILE_TIMEOUT_SECONDS = 300
 
 
 @dataclass(frozen=True)
@@ -18,8 +25,6 @@ class SystemBridgeError(Exception):
 
 
 class SystemBridge:
-    _RECORD_SEPARATOR = "\x1e"
-    _FIELD_SEPARATOR = "\x1f"
     _SPECIAL_KEY_CODES: ClassVar[dict[str, int]] = {
         "return": 36,
         "enter": 76,
@@ -34,6 +39,14 @@ class SystemBridge:
         "down": 125,
         "up": 126,
     }
+
+    def __init__(self, apps_helper_source: Path | None = None, apps_helper_binary: Path | None = None) -> None:
+        if apps_helper_source is None or apps_helper_binary is None:
+            settings = load_settings()
+            apps_helper_source = apps_helper_source or settings.apps_helper_source
+            apps_helper_binary = apps_helper_binary or settings.apps_helper_binary
+        self.apps_helper_source = apps_helper_source
+        self.apps_helper_binary = apps_helper_binary
 
     def _run(self, *command: str, input_text: str | None = None) -> str:
         try:
@@ -118,21 +131,76 @@ class SystemBridge:
         except subprocess.TimeoutExpired as exc:
             raise SystemBridgeError("COMMAND_TIMEOUT", f"Timed out while restarting {process_name}.", "Retry the request.") from exc
 
-    def _parse_app_record(self, raw: str) -> AppRecord:
-        parts = raw.split(self._FIELD_SEPARATOR)
-        if len(parts) < 3:
-            raise SystemBridgeError("INVALID_APP_RESPONSE", "Could not parse application identity.", "Retry the request.")
-        name, bundle_id, process_id = parts[:3]
-        process_value = None
-        if process_id.strip():
+    def _ensure_apps_helper(self) -> Path:
+        """Return the compiled apps helper for the current source, compiling it if needed.
+
+        The binary name carries a hash of the source, so an existing binary is always
+        current. Compilation writes to a per-process temporary file and renames it into
+        place, so concurrent servers never run a half-written binary.
+        """
+        try:
+            source_bytes = self.apps_helper_source.read_bytes()
+        except OSError as exc:
+            raise SystemBridgeError(
+                "HELPER_SOURCE_MISSING",
+                f"Missing native helper source at '{self.apps_helper_source}'.",
+                "Restore system_apps_bridge.swift and retry.",
+            ) from exc
+        digest = hashlib.sha256(source_bytes).hexdigest()[:12]
+        binary = self.apps_helper_binary.with_name(f"{self.apps_helper_binary.name}-{digest}")
+        if binary.exists():
+            return binary
+        binary.parent.mkdir(parents=True, exist_ok=True)
+        temporary = binary.with_name(f"{binary.name}.{os.getpid()}.tmp")
+        try:
             try:
-                process_value = int(process_id.strip())
-            except ValueError:
-                process_value = None
+                completed = subprocess.run(
+                    ["swiftc", "-O", str(self.apps_helper_source), "-o", str(temporary)],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=HELPER_COMPILE_TIMEOUT_SECONDS,
+                )
+            except OSError as exc:
+                raise SystemBridgeError(
+                    "SWIFTC_UNAVAILABLE",
+                    f"Could not run 'swiftc': {exc}.",
+                    "This server requires macOS with the Swift toolchain (swiftc) available.",
+                ) from exc
+            except subprocess.TimeoutExpired as exc:
+                raise SystemBridgeError(
+                    "HELPER_COMPILE_FAILED",
+                    f"Compiling the native helper exceeded the {HELPER_COMPILE_TIMEOUT_SECONDS}-second timeout.",
+                    "Confirm Xcode command line tools and Swift are available, then retry.",
+                ) from exc
+            if completed.returncode != 0:
+                raise SystemBridgeError(
+                    "HELPER_COMPILE_FAILED",
+                    completed.stderr.strip() or completed.stdout.strip() or "Failed to compile the native helper.",
+                    "Confirm Xcode command line tools and Swift are available, then retry.",
+                )
+            os.replace(temporary, binary)
+        finally:
+            temporary.unlink(missing_ok=True)
+        return binary
+
+    def _run_apps_helper(self, *args: str) -> object:
+        """Runs the NSWorkspace helper (system_apps_bridge.swift) and decodes its JSON."""
+        raw = self._run(str(self._ensure_apps_helper()), *args)
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise SystemBridgeError("INVALID_APP_RESPONSE", "Could not parse application identity.", "Retry the request.") from exc
+
+    @staticmethod
+    def _app_record(item: object) -> AppRecord:
+        if not isinstance(item, dict):
+            raise SystemBridgeError("INVALID_APP_RESPONSE", "Could not parse application identity.", "Retry the request.")
+        process_id = item.get("process_id")
         return AppRecord(
-            name=name.strip(),
-            bundle_id=bundle_id.strip() or None,
-            process_id=process_value,
+            name=str(item.get("name", "")).strip(),
+            bundle_id=str(item.get("bundle_id") or "").strip() or None,
+            process_id=process_id if isinstance(process_id, int) and not isinstance(process_id, bool) else None,
         )
 
     def _target_application(self, application: str | None = None, bundle_id: str | None = None) -> AppRecord:
@@ -140,32 +208,13 @@ class SystemBridge:
             raise SystemBridgeError("INVALID_INPUT", "bundle_id must not be empty.", "Provide a valid application bundle identifier.")
         if application is not None and not application.strip():
             raise SystemBridgeError("INVALID_INPUT", "application must not be empty.", "Provide a valid application name.")
-        raw = self._run_osascript(
-            [
-                "on run argv",
-                "set requestedName to item 1 of argv",
-                "set requestedBundleId to item 2 of argv",
-                'tell application "System Events"',
-                "if requestedBundleId is not \"\" then",
-                "set targetProcess to first application process whose bundle identifier is requestedBundleId",
-                "else if requestedName is not \"\" then",
-                "set targetProcess to first application process whose name is requestedName",
-                "else",
-                "set targetProcess to first application process whose frontmost is true",
-                "end if",
-                "set appName to name of targetProcess",
-                "set appPid to unix id of targetProcess",
-                "set appBundleId to \"\"",
-                "try",
-                "set appBundleId to bundle identifier of targetProcess",
-                "end try",
-                "end tell",
-                f'return appName & "{self._FIELD_SEPARATOR}" & appBundleId & "{self._FIELD_SEPARATOR}" & (appPid as text)',
-                "end run",
-            ],
-            args=[application or "", bundle_id or ""],
-        )
-        return self._parse_app_record(raw)
+        if bundle_id:
+            payload = self._run_apps_helper("bundle-id", bundle_id)
+        elif application:
+            payload = self._run_apps_helper("name", application)
+        else:
+            payload = self._run_apps_helper("frontmost")
+        return self._app_record(payload)
 
     def battery(self) -> BatteryStatus:
         raw = self._run("pmset", "-g", "batt")
@@ -186,25 +235,10 @@ class SystemBridge:
         return self.frontmost_application().name
 
     def running_apps(self) -> list[AppRecord]:
-        raw = self._run_osascript(
-            [
-                'tell application "System Events"',
-                "set outputRows to {}",
-                "repeat with targetProcess in every application process whose background only is false",
-                "set appName to name of targetProcess",
-                "set appPid to unix id of targetProcess",
-                "set appBundleId to \"\"",
-                "try",
-                "set appBundleId to bundle identifier of targetProcess",
-                "end try",
-                f'set end of outputRows to appName & "{self._FIELD_SEPARATOR}" & appBundleId & "{self._FIELD_SEPARATOR}" & (appPid as text)',
-                "end repeat",
-                f'set AppleScript\'s text item delimiters to "{self._RECORD_SEPARATOR}"',
-                "return outputRows as text",
-                "end tell",
-            ]
-        )
-        return [self._parse_app_record(item) for item in raw.split(self._RECORD_SEPARATOR) if item.strip()]
+        payload = self._run_apps_helper("running")
+        if not isinstance(payload, list):
+            raise SystemBridgeError("INVALID_APP_RESPONSE", "Could not parse application identity.", "Retry the request.")
+        return [self._app_record(item) for item in payload]
 
     def get_clipboard(self) -> str:
         return self._run("pbpaste")

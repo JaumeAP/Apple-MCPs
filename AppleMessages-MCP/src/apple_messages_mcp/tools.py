@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.types import Annotations, ToolAnnotations
@@ -382,6 +383,17 @@ def messages_reply_in_conversation(chat_id: str, text: str) -> SendResponse | Er
 def messages_send_attachment(recipient: str, file_path: str, text: str | None = None) -> SendResponse | ErrorResponse:
     try:
         ensure_action_allowed("messages_send_attachment")
+        if file_path.strip():
+            # Resolve symlinks first so a link inside an allowed root cannot point outside it.
+            resolved = Path(file_path).expanduser().resolve(strict=False)
+            roots = [root.resolve(strict=False) for root in load_settings().allowed_attachment_roots]
+            if not any(resolved.is_relative_to(root) for root in roots):
+                return _error_response(
+                    "PATH_NOT_ALLOWED",
+                    f"Attachment path is outside the allowed roots: {resolved}",
+                    f"Move the file into one of {', '.join(str(root) for root in roots)} or set APPLE_MESSAGES_MCP_ALLOWED_ATTACHMENT_ROOTS.",
+                )
+            file_path = str(resolved)
         result = _automation_bridge().send_attachment(recipient=recipient, file_path=file_path, text=text)
         return SendResponse(**result)
     except SafetyError as exc:

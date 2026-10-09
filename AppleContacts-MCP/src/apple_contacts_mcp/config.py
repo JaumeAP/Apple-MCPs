@@ -14,12 +14,19 @@ class Settings:
     version: str
     safety_mode: SafetyMode
     log_level: str
-    scripts_dir: Path
+    helper_source: Path
+    helper_binary: Path
 
 
 @lru_cache(maxsize=1)
 def load_settings() -> Settings:
     package_dir = Path(__file__).resolve().parent
+    helper_build_dir = Path(
+        os.environ.get(
+            "APPLE_CONTACTS_MCP_HELPER_BUILD_DIR",
+            str(Path.home() / ".apple-mcps" / "build"),
+        )
+    ).expanduser()
     raw_safety_mode = os.environ.get("APPLE_CONTACTS_MCP_SAFETY_MODE", "safe_manage").strip() or "safe_manage"
     if raw_safety_mode not in VALID_SAFETY_MODES:
         raw_safety_mode = "safe_manage"
@@ -29,5 +36,6 @@ def load_settings() -> Settings:
         version="1.0.5",
         safety_mode=cast(SafetyMode, raw_safety_mode),
         log_level=os.environ.get("APPLE_CONTACTS_MCP_LOG_LEVEL", "INFO").strip().upper() or "INFO",
-        scripts_dir=package_dir / "applescripts",
+        helper_source=package_dir / "contacts_bridge.swift",
+        helper_binary=helper_build_dir / "apple-contacts-bridge",
     )

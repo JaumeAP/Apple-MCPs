@@ -96,13 +96,29 @@ claude mcp add --transport stdio --scope project apple-contacts -- uvx apple-con
 
 ## Search Behavior
 
-Name and organization searches use Contacts.app's filtered lookup. A no-match name returns an empty result without scanning the whole address book. Phone queries with a numeric/punctuation base, including recognized extension suffixes (`ext`, `ext.`, `extension`, `extn.`, `x`, `#`, and `;ext=`) and an optional `tel:` prefix, retain the paginated directory fallback for method-value matching. Email queries containing `@` retain it too. Extension matching keeps the base number and extension separate, requires the exact extension, and allows local-number suffix matching. Recipient resolution chooses the matching phone method and rejects multiple distinct matching methods.
+Name and organization searches use the helper's filtered lookup (case-insensitive substring match on the display name or organization). A no-match name returns an empty result without scanning the whole address book. Phone queries with a numeric/punctuation base, including recognized extension suffixes (`ext`, `ext.`, `extension`, `extn.`, `x`, `#`, and `;ext=`) and an optional `tel:` prefix, retain the paginated directory fallback for method-value matching. Email queries containing `@` retain it too. Extension matching keeps the base number and extension separate, requires the exact extension, and allows local-number suffix matching. Recipient resolution chooses the matching phone method and rejects multiple distinct matching methods.
 
 Literal control characters and complex emoji returned by Contacts are decoded on the Python side without changing their text.
 
+## Native Helper
+
+Contacts are read and written through a small Swift helper built on the Contacts framework
+(`contacts_bridge.swift`), not AppleScript, so the server never launches or waits on Contacts.app.
+The helper is compiled with `swiftc` on first use into `~/.apple-mcps/build/apple-contacts-bridge`
+(override with `APPLE_CONTACTS_MCP_HELPER_BUILD_DIR`) and rebuilt when the source changes. The
+Xcode command line tools must be installed.
+
+- Notes: macOS reserves the contact note field for apps with the
+  `com.apple.developer.contacts.notes` entitlement, which the locally compiled helper does not have.
+  Notes are not returned, and creating or updating a contact with a non-empty `note` fails with an
+  explicit error.
+- Optional backups: set `APPLE_CONTACTS_MCP_BACKUP_DIR` to save each contact as a `.vcf` file in that
+  directory before `contacts_update_contact` or `contacts_delete_contact` changes it.
+
 ## macOS Permissions
 
-- Contacts access is required
+- Contacts access is required (Privacy & Security > Contacts for the app that launches the server)
+- No Automation permission for Contacts.app is needed
 - `contacts_health` reports whether Contacts access is currently available
 
 ## Launch Checklist

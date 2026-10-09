@@ -84,6 +84,16 @@ claude mcp add --transport stdio --scope project apple-system -- uvx apple-syste
 
 `stdio` is the default and recommended transport. Set `APPLE_SYSTEM_MCP_TRANSPORT=streamable-http` (with optional `APPLE_SYSTEM_MCP_HOST` and `APPLE_SYSTEM_MCP_PORT`) to serve Streamable HTTP instead.
 
+## Native Application Lookup
+
+The frontmost application, the running applications, and the target application of the GUI
+tools are resolved with `NSWorkspace` through a small Swift helper (`system_apps_bridge.swift`),
+not through System Events, so these reads send no Apple Events and need no Automation
+permission. The helper is compiled with `swiftc` on first use into
+`~/.apple-mcps/build/apple-system-apps-bridge` (override with `APPLE_SYSTEM_MCP_HELPER_BUILD_DIR`)
+and rebuilt when the source changes. Notifications, appearance mode and the GUI actions
+themselves still use AppleScript.
+
 ## Prompting Notes
 
 - `tools/list` returns the full System tool surface. Context-constrained clients can use `search_tools` first, then `get_tool_info` for the System tool they need.

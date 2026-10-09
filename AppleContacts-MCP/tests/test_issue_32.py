@@ -1,21 +1,19 @@
 """Coverage authored for issue #32; live deletion needs macOS validation."""
 
 import json
-import shutil
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 
 from apple_contacts_mcp.contacts_bridge import AppleContactsBridge, ContactsBridgeError
 
-SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "src" / "apple_contacts_mcp" / "applescripts"
+# These tests replace _run_script or the subprocess, so the helper is never compiled.
+HELPER = (Path("/tmp/contacts_bridge.swift"), Path("/tmp/apple-contacts-bridge"))
 
 
 @pytest.mark.parametrize("query", ["Nobody Here", "Studio54", "Person 123", "東京", "alice.example.com", "Studio54 ext5", "Person 123 ext5", "ext 5", "x5"])
 def test_no_match_name_does_not_scan_contact_directory(monkeypatch, query) -> None:
-    bridge = AppleContactsBridge(SCRIPTS_DIR)
+    bridge = AppleContactsBridge(*HELPER)
 
     def fake_run_script(script_name: str, *args: str) -> dict[str, object]:
         assert script_name == "search_contacts.applescript"
@@ -28,7 +26,7 @@ def test_no_match_name_does_not_scan_contact_directory(monkeypatch, query) -> No
 
 @pytest.mark.parametrize("query", ["+", "---", "()", "."])
 def test_non_method_query_does_not_scan_contact_directory(monkeypatch, query) -> None:
-    bridge = AppleContactsBridge(SCRIPTS_DIR)
+    bridge = AppleContactsBridge(*HELPER)
 
     def fake_run_script(script_name: str, *args: str) -> dict[str, object]:
         raise AssertionError(f"Unexpected directory scan: {script_name}")
@@ -48,7 +46,7 @@ def test_non_method_query_does_not_scan_contact_directory(monkeypatch, query) ->
     ],
 )
 def test_method_queries_keep_directory_fallback(monkeypatch, query, phone, email) -> None:
-    bridge = AppleContactsBridge(SCRIPTS_DIR)
+    bridge = AppleContactsBridge(*HELPER)
 
     def fake_run_script(script_name: str, *args: str) -> dict[str, object]:
         if script_name == "search_contacts.applescript":
@@ -78,11 +76,12 @@ def install_finished_process(monkeypatch, output: str) -> None:
         return FinishedProcess()
 
     monkeypatch.setattr("apple_contacts_mcp.contacts_bridge.subprocess.Popen", fake_popen)
+    monkeypatch.setattr(AppleContactsBridge, "_ensure_helper", lambda self: self.helper_binary)
 
 
 @pytest.mark.parametrize("control_code", range(32))
 def test_run_script_preserves_literal_string_controls_and_complex_emoji(monkeypatch, control_code) -> None:
-    bridge = AppleContactsBridge(SCRIPTS_DIR)
+    bridge = AppleContactsBridge(*HELPER)
     value = "before" + chr(control_code) + "after 👩🏽‍💻 👨‍👩‍👧‍👦 🇺🇸 e\u0301"
     install_finished_process(monkeypatch, '{"text":"' + value + '"}')
 
@@ -93,7 +92,7 @@ def test_run_script_preserves_literal_string_controls_and_complex_emoji(monkeypa
 
 
 def test_run_script_preserves_existing_json_escapes(monkeypatch) -> None:
-    bridge = AppleContactsBridge(SCRIPTS_DIR)
+    bridge = AppleContactsBridge(*HELPER)
     value = 'tab\tline\nquote"backslash\\literal\\n 👩🏽‍💻'
     install_finished_process(monkeypatch, json.dumps({"text": value}, ensure_ascii=False))
 
@@ -102,7 +101,7 @@ def test_run_script_preserves_existing_json_escapes(monkeypatch) -> None:
 
 @pytest.mark.parametrize("output", ['{"text":\x01}', '{"text":"unescaped " quote"}', "{}junk", "[]"])
 def test_run_script_still_rejects_invalid_json_or_non_objects(monkeypatch, output) -> None:
-    bridge = AppleContactsBridge(SCRIPTS_DIR)
+    bridge = AppleContactsBridge(*HELPER)
     install_finished_process(monkeypatch, output)
 
     with pytest.raises(ContactsBridgeError) as exc_info:
@@ -111,20 +110,13 @@ def test_run_script_still_rejects_invalid_json_or_non_objects(monkeypatch, outpu
     assert exc_info.value.error_code == "INVALID_SCRIPT_OUTPUT"
 
 
-def test_delete_contact_resolves_repeat_reference_before_delete() -> None:
-    source = (SCRIPTS_DIR / "delete_contact.applescript").read_text()
-    assert "set targetPerson to contents of thePerson" in source
-    assert "set targetPerson to thePerson\n" not in source
-    assert source.index("set targetPerson to contents of thePerson") < source.index("delete targetPerson")
-
-
 @pytest.mark.parametrize("query", [
     "555-1234 ext 5", "555-1234 EXT. 5", "555-1234 extension 5",
     "555-1234 extn. 5", "555-1234 x5", "555-1234 #5",
     "555-1234;ext=5", "tel:555-1234;ext=5",
 ])
 def test_phone_extensions_reach_method_scan_and_recipient_resolution(monkeypatch, query) -> None:
-    bridge = AppleContactsBridge(SCRIPTS_DIR)
+    bridge = AppleContactsBridge(*HELPER)
     contact = {
         "contact_id": "contact-extension",
         "name": "Example Person",
@@ -153,7 +145,7 @@ def test_phone_extensions_reach_method_scan_and_recipient_resolution(monkeypatch
 
 @pytest.mark.parametrize("query", ["+ ext5", "ext5", "#5", "555-1234 ext", "555-1234 extno 5"])
 def test_incomplete_or_non_numeric_extension_queries_do_not_scan_directory(monkeypatch, query) -> None:
-    bridge = AppleContactsBridge(SCRIPTS_DIR)
+    bridge = AppleContactsBridge(*HELPER)
 
     def fake_run_script(script_name, *args):
         assert script_name == "search_contacts.applescript"
@@ -163,24 +155,9 @@ def test_incomplete_or_non_numeric_extension_queries_do_not_scan_directory(monke
     assert bridge.search_contacts(query) == []
 
 
-@pytest.mark.skipif(
-    sys.platform != "darwin" or shutil.which("osacompile") is None,
-    reason="osacompile is only available on macOS",
-)
-def test_contacts_delete_script_compiles(tmp_path) -> None:
-    script_path = SCRIPTS_DIR / "delete_contact.applescript"
-    completed = subprocess.run(
-        ["osacompile", "-o", str(tmp_path / "delete_contact.scpt"), str(script_path)],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert completed.returncode == 0, completed.stderr or completed.stdout
-
-
 @pytest.mark.parametrize("query", ["555-1234 x5", "555-1234 ext. 5", "555-1234;ext=5"])
 def test_extension_query_does_not_match_concatenated_number_or_other_extension(monkeypatch, query) -> None:
-    bridge = AppleContactsBridge(SCRIPTS_DIR)
+    bridge = AppleContactsBridge(*HELPER)
 
     def fake_run_script(script_name, *args):
         assert script_name == "list_contacts.applescript"
@@ -198,7 +175,7 @@ def test_extension_query_does_not_match_concatenated_number_or_other_extension(m
 
 
 def test_extension_query_selects_correct_contact_and_matching_secondary_phone(monkeypatch) -> None:
-    bridge = AppleContactsBridge(SCRIPTS_DIR)
+    bridge = AppleContactsBridge(*HELPER)
     target = {
         "contact_id": "target", "name": "Target",
         "phones": [
@@ -224,7 +201,7 @@ def test_extension_query_selects_correct_contact_and_matching_secondary_phone(mo
 
 
 def test_extension_query_rejects_multiple_matching_phone_methods(monkeypatch) -> None:
-    bridge = AppleContactsBridge(SCRIPTS_DIR)
+    bridge = AppleContactsBridge(*HELPER)
     target = {
         "contact_id": "target", "name": "Target",
         "phones": [
@@ -246,7 +223,7 @@ def test_extension_query_rejects_multiple_matching_phone_methods(monkeypatch) ->
 
 
 def test_phone_identity_preserves_extension_boundary_and_leading_zeroes() -> None:
-    bridge = AppleContactsBridge(SCRIPTS_DIR)
+    bridge = AppleContactsBridge(*HELPER)
     assert bridge._normalize_lookup_value("555-1234 x5") == "5551234;ext=5"
     assert bridge._normalize_lookup_value("555-12345") == "55512345"
     assert bridge._normalize_lookup_value("555-1234 ext. 05") == "5551234;ext=05"

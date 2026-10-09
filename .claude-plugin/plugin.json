@@ -1,0 +1,65 @@
+{
+  "name": "apple-mcps",
+  "version": "1.0.5-jap.1",
+  "description": "Apple apps on macOS: Contacts (native helper instead of AppleScript), Reminders, Calendar, Maps, Files, Shortcuts, System, Notes and Messages.",
+  "author": {
+    "name": "Jonathan Reed (upstream); native Contacts helper by JaumeAP"
+  },
+  "homepage": "https://github.com/JaumeAP/Apple-MCPs/tree/claude-plugin",
+  "repository": "https://github.com/JaumeAP/Apple-MCPs",
+  "license": "MIT",
+  "mcpServers": {
+    "apple-contacts": {
+      "command": "uv",
+      "args": ["run", "--directory", "${CLAUDE_PLUGIN_ROOT}/AppleContacts-MCP", "apple-contacts-mcp"],
+      "env": {
+        "APPLE_CONTACTS_MCP_SAFETY_MODE": "full_access",
+        "APPLE_CONTACTS_MCP_BACKUP_DIR": "~/contact-backups"
+      }
+    },
+    "apple-reminders": {
+      "command": "uv",
+      "args": ["run", "--directory", "${CLAUDE_PLUGIN_ROOT}/AppleReminders-MCP", "apple-reminders-mcp"],
+      "env": {
+        "APPLE_REMINDERS_MCP_SAFETY_MODE": "full_access"
+      }
+    },
+    "apple-calendar": {
+      "command": "uv",
+      "args": ["run", "--directory", "${CLAUDE_PLUGIN_ROOT}/Apple-Calendar-MCP", "apple-calendar-mcp"],
+      "env": {
+        "APPLE_CALENDAR_MCP_SAFETY_MODE": "full_access"
+      }
+    },
+    "apple-maps": {
+      "command": "uv",
+      "args": ["run", "--directory", "${CLAUDE_PLUGIN_ROOT}/AppleMaps-MCP", "apple-maps-mcp"]
+    },
+    "apple-files": {
+      "command": "uv",
+      "args": ["run", "--directory", "${CLAUDE_PLUGIN_ROOT}/AppleFiles-MCP", "apple-files-mcp"]
+    },
+    "apple-shortcuts": {
+      "command": "uv",
+      "args": ["run", "--directory", "${CLAUDE_PLUGIN_ROOT}/AppleShortcuts-MCP", "apple-shortcuts-mcp"],
+      "env": {
+        "APPLE_SHORTCUTS_MCP_SAFETY_MODE": "full_access"
+      }
+    },
+    "apple-system": {
+      "command": "uv",
+      "args": ["run", "--directory", "${CLAUDE_PLUGIN_ROOT}/AppleSystem-MCP", "apple-system-mcp"]
+    },
+    "apple-notes": {
+      "command": "uv",
+      "args": ["run", "--directory", "${CLAUDE_PLUGIN_ROOT}/AppleNotes-MCP", "apple-notes-mcp"],
+      "env": {
+        "APPLE_NOTES_MCP_SAFETY_MODE": "full_access"
+      }
+    },
+    "apple-messages": {
+      "command": "uv",
+      "args": ["run", "--directory", "${CLAUDE_PLUGIN_ROOT}/AppleMessages-MCP", "apple-messages-mcp"]
+    }
+  }
+}

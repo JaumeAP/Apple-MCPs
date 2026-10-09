@@ -1281,3 +1281,20 @@ def test_run_jxa_keeps_recovery_guidance_for_unrelated_process_failures(monkeypa
     assert failure.value.error_code == "APPLESCRIPT_FALLBACK_FAILED"
     assert failure.value.message == "Calendar.app automation failed"
     assert failure.value.suggestion == "Confirm Calendar.app automation is allowed, then retry."
+
+
+def test_run_jxa_applies_default_timeout_so_fallbacks_cannot_hang(monkeypatch):
+    bridge = CalendarBridge(Path("/tmp/source.swift"), Path("/tmp/helper"))
+    timeouts = []
+
+    def fake_run(command, **kwargs):
+        timeouts.append(kwargs.get("timeout"))
+        return subprocess.CompletedProcess(command, 0, stdout='{"items": []}', stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    bridge._run_jxa("generated script")
+    bridge._fallback_list_calendars()
+
+    assert timeouts == [CalendarBridge._JXA_TIMEOUT_SECONDS] * 2
+    assert CalendarBridge._JXA_TIMEOUT_SECONDS == 30

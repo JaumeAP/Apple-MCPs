@@ -1,0 +1,16 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "jaumeap-apple-mcps",
+  "description": "JaumeAP's fork of Apple-MCPs packaged as Claude Code plugins.",
+  "owner": {
+    "name": "JaumeAP"
+  },
+  "plugins": [
+    {
+      "name": "apple-mcps",
+      "description": "Apple apps on macOS: Contacts, Reminders, Calendar, Maps, Files, Shortcuts, System, Notes and Messages.",
+      "source": "./",
+      "category": "productivity"
+    }
+  ]
+}

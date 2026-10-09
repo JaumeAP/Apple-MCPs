@@ -17,9 +17,18 @@ on run argv
 					if folderFilter is not "" and fldId is not folderFilter then
 						-- skip
 					else
-						repeat with n in notes of fld
-							set end of jsonItems to my note_json(accId, accName, fldId, fldName, n)
-						end repeat
+						set folderItems to missing value
+						try
+							set folderItems to my folder_notes_json(accId, accName, fldId, fldName, fld)
+						end try
+						if folderItems is missing value then
+							-- Bulk fetch failed: fall back to per-note property reads.
+							set folderItems to {}
+							repeat with n in notes of fld
+								set end of folderItems to my note_json(accId, accName, fldId, fldName, n)
+							end repeat
+						end if
+						set jsonItems to jsonItems & folderItems
 					end if
 				end repeat
 			end if
@@ -59,6 +68,50 @@ on note_json(accountId, accountName, folderId, folderName, n)
 	try
 		tell application "Notes" to set attachmentCount to count of attachments of n
 	end try
+	return my note_record_json(noteId, titleText, accountId, accountName, folderId, folderName, createdEpoch, modifiedEpoch, sharedValue, attachmentCount, plainText)
+end note_json
+
+-- Reads each property for every note of the folder in one Apple Event per
+-- property instead of one per note and property. Errors (including a folder
+-- that changed between reads) propagate so the caller can fall back.
+on folder_notes_json(accountId, accountName, folderId, folderName, fld)
+	tell application "Notes"
+		set noteIds to id of every note of fld
+		set noteNames to name of every note of fld
+		set notePlainTexts to plaintext of every note of fld
+		set createdDates to creation date of every note of fld
+		set modifiedDates to modification date of every note of fld
+		set sharedValues to shared of every note of fld
+	end tell
+	set noteCount to count of noteIds
+	repeat with propertyValues in {noteNames, notePlainTexts, createdDates, modifiedDates, sharedValues}
+		if (count of propertyValues) is not noteCount then error "Notes changed while the folder was being listed."
+	end repeat
+	set folderItems to {}
+	repeat with i from 1 to noteCount
+		set noteId to my safe_text(item i of noteIds)
+		set createdEpoch to 0
+		set modifiedEpoch to 0
+		set attachmentCount to 0
+		try
+			set createdEpoch to my date_to_epoch(item i of createdDates)
+		end try
+		try
+			set modifiedEpoch to my date_to_epoch(item i of modifiedDates)
+		end try
+		set sharedValue to item i of sharedValues
+		if sharedValue is not true then set sharedValue to false
+		-- ponytail: attachment count is still one Apple Event per note; Notes has no
+		-- reliable bulk form for a per-note element count.
+		try
+			tell application "Notes" to set attachmentCount to count of attachments of note id noteId
+		end try
+		set end of folderItems to my note_record_json(noteId, my safe_text(item i of noteNames), accountId, accountName, folderId, folderName, createdEpoch, modifiedEpoch, sharedValue, attachmentCount, my safe_text(item i of notePlainTexts))
+	end repeat
+	return folderItems
+end folder_notes_json
+
+on note_record_json(noteId, titleText, accountId, accountName, folderId, folderName, createdEpoch, modifiedEpoch, sharedValue, attachmentCount, plainText)
 	set noteJson to "{" & ¬
 		quote & "note_id" & quote & ":" & my json_string(noteId) & "," & ¬
 		quote & "title" & quote & ":" & my json_string(titleText) & "," & ¬
@@ -72,7 +125,7 @@ on note_json(accountId, accountName, folderId, folderName, n)
 		quote & "attachment_count" & quote & ":" & attachmentCount & "," & ¬
 		quote & "plaintext" & quote & ":" & my json_string(plainText) & "}"
 	return noteJson
-end note_json
+end note_record_json
 
 on date_to_epoch(dateValue)
 	set epochDate to current date
