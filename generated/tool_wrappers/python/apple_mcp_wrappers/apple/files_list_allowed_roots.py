@@ -10,7 +10,7 @@ async def files_list_allowed_roots(
 ) -> Any:
     """Files List Allowed Roots
 
-    Delegated Apple domain tool 'files_list_allowed_roots' exposed through Apple-Tools-MCP.
+    List the file system roots the server may access.
 
     Example:
         await files_list_allowed_roots(client)

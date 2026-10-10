@@ -6,6 +6,7 @@ import uuid
 from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
+from typing import ClassVar
 from urllib.parse import unquote
 
 from apple_calendar_mcp.models import CalendarInfo, EventDetail, EventSummary
@@ -25,6 +26,8 @@ class CalendarBridge:
     _COMPILE_TIMEOUT_SECONDS = 300
     # A timeout leaves the outcome of these commands unknown.
     _MUTATING_COMMANDS = frozenset({"create-calendar-event", "update-calendar-event", "delete-calendar-event"})
+    # Shared by every bridge instance in this process (one per tool call).
+    _COMPILE_FAILURES: ClassVar[dict[Path, CalendarBridgeError]] = {}
 
     def __init__(self, helper_source: Path, helper_binary: Path) -> None:
         self.helper_source = helper_source
@@ -116,7 +119,8 @@ class CalendarBridge:
         try:
             payload = self._run_helper("get-calendar-event", event_id)
         except CalendarBridgeError as exc:
-            if not self._should_use_fallback(exc):
+            # A read may still fall back after a compile timeout: it changes nothing.
+            if not (exc.error_code == "HELPER_COMPILE_TIMEOUT" or self._should_use_fallback(exc, event_id)):
                 raise
             payload = self._fallback_get_event(event_id)
             provider = "jxa"
@@ -327,12 +331,8 @@ class CalendarBridge:
         all_day: bool | None = None,
         recurrence: dict[str, object] | None = None,
     ) -> EventDetail:
-        # The helper reads an empty string as "clear", so '' would silently erase
-        # these fields. Treat it as "no change", like every other omitted field.
-        if notes is not None and not notes.strip():
-            notes = None
-        if location is not None and not location.strip():
-            location = None
+        # The helper reads an empty (or whitespace-only) string as "clear": that
+        # is the only way to remove these fields, since None means "no change".
         request: dict[str, object] = {}
         if title is not None:
             request["title"] = title
@@ -360,7 +360,7 @@ class CalendarBridge:
         try:
             payload = self._run_helper("update-calendar-event", event_id, json.dumps(request))
         except CalendarBridgeError as exc:
-            if not self._should_use_fallback(exc):
+            if not self._should_use_fallback(exc, event_id):
                 raise
             payload = self._fallback_update_event(
                 event_id,
@@ -380,7 +380,7 @@ class CalendarBridge:
         try:
             payload = self._run_helper("delete-calendar-event", event_id)
         except CalendarBridgeError as exc:
-            if not self._should_use_fallback(exc):
+            if not self._should_use_fallback(exc, event_id):
                 raise
             payload = self._fallback_delete_event(event_id)
         return bool(payload.get("deleted", False))
@@ -451,7 +451,24 @@ class CalendarBridge:
         ):
             return
 
-        self.helper_binary.parent.mkdir(parents=True, exist_ok=True)
+        # A failed or stalled compile is not retried in this process: every tool
+        # call builds a new bridge, and each retry could stall another 300 s.
+        # ponytail: remembered until the server restarts; a fixed toolchain needs a restart.
+        failure = self._COMPILE_FAILURES.get(self.helper_source)
+        if failure is not None:
+            raise CalendarBridgeError(failure.error_code, failure.message, failure.suggestion)
+        try:
+            self._compile_helper(info_plist)
+        except CalendarBridgeError as exc:
+            if exc.error_code in {"HELPER_COMPILE_TIMEOUT", "HELPER_COMPILE_FAILED", "SWIFTC_UNAVAILABLE"}:
+                self._COMPILE_FAILURES[self.helper_source] = exc
+            raise
+
+    def _compile_helper(self, info_plist: Path) -> None:
+        try:
+            self.helper_binary.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise CalendarBridgeError("HELPER_INSTALL_FAILED", f"Could not create the helper directory: {exc}.", "Retry the request.") from exc
         # Compile beside the final path and rename it into place, so a concurrent
         # run never executes a half-written binary.
         temp_binary = self.helper_binary.with_name(f".{self.helper_binary.name}.{uuid.uuid4().hex}.tmp")
@@ -467,8 +484,8 @@ class CalendarBridge:
             except subprocess.TimeoutExpired as exc:
                 raise CalendarBridgeError(
                     "HELPER_COMPILE_TIMEOUT",
-                    "Compiling the native helper timed out.",
-                    "Confirm Xcode command line tools and Swift are available, then retry.",
+                    "Compiling the native helper timed out; nothing was changed.",
+                    "Confirm Xcode command line tools and Swift are available, then restart the server.",
                 ) from exc
             except OSError as exc:
                 raise CalendarBridgeError(
@@ -480,12 +497,15 @@ class CalendarBridge:
                 raise CalendarBridgeError(
                     "HELPER_COMPILE_FAILED",
                     completed.stderr.strip() or completed.stdout.strip() or "Failed to compile the native helper.",
-                    "Confirm Xcode command line tools and Swift are available, then retry.",
+                    "Confirm Xcode command line tools and Swift are available, then restart the server.",
                 )
-            os.replace(temp_binary, self.helper_binary)
+            try:
+                os.replace(temp_binary, self.helper_binary)
+                self._write_bundle_info_plist(info_plist)
+            except OSError as exc:
+                raise CalendarBridgeError("HELPER_INSTALL_FAILED", f"Could not install the compiled native helper: {exc}.", "Retry the request.") from exc
         finally:
             temp_binary.unlink(missing_ok=True)
-        self._write_bundle_info_plist(info_plist)
 
     def _bundle_info_plist_path(self) -> Path:
         # helper_binary is .../apple-calendar-pim-bridge.app/Contents/MacOS/apple-calendar-pim-bridge.
@@ -546,7 +566,18 @@ class CalendarBridge:
             "HELPER_EXECUTION_FAILED",
         }
 
-    def _should_use_fallback(self, error: CalendarBridgeError) -> bool:
+    @staticmethod
+    def _is_occurrence_id(event_id: str) -> bool:
+        base, separator, start = event_id.rpartition("@")
+        if not separator or not base:
+            return False
+        try:
+            datetime.fromisoformat(start.replace("Z", "+00:00"))
+        except ValueError:
+            return False
+        return True
+
+    def _should_use_fallback(self, error: CalendarBridgeError, event_id: str | None = None) -> bool:
         # CALENDAR_NOT_FOUND / EVENT_NOT_FOUND on top of the read-fallback
         # codes: when the native EventKit helper only has write-only access
         # (no can_read_events), every id the caller ever saw came from the
@@ -555,6 +586,14 @@ class CalendarBridge:
         # identifier. The native helper can then never resolve it, no matter
         # how valid the id is, so the same request has to be retried through
         # the JXA fallback instead of surfacing a confusing "not found".
+        # A compile timeout is not among them: the JXA write would land minutes
+        # after the client gave up, and its retry would duplicate the change.
+        if error.error_code == "HELPER_COMPILE_TIMEOUT":
+            return False
+        # An occurrence id ("<id>@<ISO start>") only ever comes from the native
+        # helper; JXA can never resolve it, so a native miss is final.
+        if error.error_code == "EVENT_NOT_FOUND" and event_id is not None and self._is_occurrence_id(event_id):
+            return False
         return self._should_use_read_fallback(error) or error.error_code in {
             "CALENDAR_NOT_FOUND",
             "EVENT_NOT_FOUND",

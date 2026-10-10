@@ -161,6 +161,13 @@ def test_system_health_respects_safety_mode(monkeypatch):
     assert "gui_press_keys" not in manage.capabilities
 
     monkeypatch.setenv("APPLE_SYSTEM_MCP_SAFETY_MODE", "full_access")
+    monkeypatch.delenv("APPLE_SYSTEM_MCP_GUI_ALLOWED_APPS", raising=False)
+    tools.load_settings.cache_clear()
+
+    # An empty allow-list refuses every GUI input, so none is advertised.
+    assert "gui_press_keys" not in tools.system_health().capabilities
+
+    monkeypatch.setenv("APPLE_SYSTEM_MCP_GUI_ALLOWED_APPS", "com.apple.TextEdit")
     tools.load_settings.cache_clear()
 
     assert "gui_press_keys" in tools.system_health().capabilities

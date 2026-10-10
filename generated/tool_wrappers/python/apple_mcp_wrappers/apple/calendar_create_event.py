@@ -18,7 +18,7 @@ async def calendar_create_event(
 ) -> Any:
     """Calendar Create Event
 
-    Delegated Apple domain tool 'calendar_create_event' exposed through Apple-Tools-MCP.
+    Create a new event in a specific Apple Calendar calendar.
 
     Example:
         await calendar_create_event(client, title='example_title', start_iso='2026-04-07T18:00:00', end_iso='2026-04-07T18:00:00', calendar_id='example_calendar_id')

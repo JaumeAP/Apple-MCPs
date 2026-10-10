@@ -20,7 +20,7 @@ async def reminders_update_reminder(
 ) -> Any:
     """Update Reminder
 
-    Update one or more fields on an existing reminder. An empty list_id or notes leaves that field unchanged.
+    Update one or more fields on an existing reminder. An empty list_id leaves the list unchanged; an empty notes clears the notes.
 
     Example:
         await reminders_update_reminder(client, reminder_id='example_reminder_id', title='example_title')

@@ -191,7 +191,8 @@ def system_health() -> HealthResponse:
                 "gui_list_menu_bar_items",
             ]
         )
-    if settings.safety_mode == "full_access":
+    # With an empty allow-list every GUI input is refused, so none is advertised.
+    if settings.safety_mode == "full_access" and settings.gui_allowed_apps:
         capabilities.extend(
             [
                 "gui_click_menu_path",

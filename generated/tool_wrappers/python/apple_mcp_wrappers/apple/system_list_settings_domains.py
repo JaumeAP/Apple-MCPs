@@ -10,7 +10,7 @@ async def system_list_settings_domains(
 ) -> Any:
     """System List Settings Domains
 
-    Delegated Apple domain tool 'system_list_settings_domains' exposed through Apple-Tools-MCP.
+    List the common macOS preference domains exposed by Apple System MCP.
 
     Example:
         await system_list_settings_domains(client)

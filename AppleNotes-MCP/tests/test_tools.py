@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from apple_notes_mcp import tools
@@ -221,6 +223,15 @@ def test_delete_folder_checks_nested_subfolders(monkeypatch) -> None:
     _allow_only_work(monkeypatch)
 
     assert tools.notes_delete_folder(folder_id="folder-2").error.error_code == "FOLDER_BLOCKED"
+
+
+def test_create_folder_checks_the_parent_and_listings_hide_blocked_folders(monkeypatch) -> None:
+    # A "Work" created inside blocked "Secret" would pass the name-based checks.
+    _allow_only_work(monkeypatch)
+
+    assert tools.notes_create_folder("Work", "iCloud", parent_folder_id="folder-3").error.error_code == "FOLDER_BLOCKED"
+    assert [folder.name for folder in tools.notes_list_folders().folders] == ["Work"]
+    assert [folder["name"] for folder in json.loads(tools.notes_folders_resource())["folders"]] == ["Work"]
 
 
 def test_empty_folder_id_means_no_folder(monkeypatch) -> None:

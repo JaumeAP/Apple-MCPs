@@ -10,7 +10,7 @@ async def reminders_list_lists(
 ) -> Any:
     """Reminders List Lists
 
-    Delegated Apple domain tool 'reminders_list_lists' exposed through Apple-Tools-MCP.
+    List available Apple Reminders lists.
 
     Example:
         await reminders_list_lists(client)

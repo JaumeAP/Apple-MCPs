@@ -11,7 +11,7 @@ async def notes_list_attachments(
 ) -> Any:
     """Notes List Attachments
 
-    Delegated Apple domain tool 'notes_list_attachments' exposed through Apple-Tools-MCP.
+    List attachments for a note.
 
     Example:
         await notes_list_attachments(client, note_id='example_note_id')

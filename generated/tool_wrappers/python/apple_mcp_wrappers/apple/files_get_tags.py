@@ -11,7 +11,7 @@ async def files_get_tags(
 ) -> Any:
     """Files Get Tags
 
-    Delegated Apple domain tool 'files_get_tags' exposed through Apple-Tools-MCP.
+    Read Finder tags for a file or folder inside the allowed roots.
 
     Example:
         await files_get_tags(client, path='/path/to/item')

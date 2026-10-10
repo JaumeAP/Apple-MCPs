@@ -572,6 +572,25 @@ def test_update_note_refuses_rename_of_note_with_attachments(monkeypatch) -> Non
     assert exc_info.value.error_code == "NOTE_HAS_ATTACHMENTS"
 
 
+def test_attachment_lookup_that_misses_the_note_fails_closed(monkeypatch) -> None:
+    # "No such note" must not read as "no attachments": the guard would let `set body` drop them.
+    bridge = AppleNotesBridge(Path("/tmp/scripts"))
+
+    def fake_run_script(script_name: str, *args: str) -> dict[str, object]:
+        if script_name == "get_note.applescript":
+            return {"found": True, "note": _note_payload("note-1", "Trip")}
+        if script_name == "list_attachments.applescript":
+            return {"found": False}
+        raise AssertionError(f"Unexpected script: {script_name}")
+
+    monkeypatch.setattr(bridge, "_run_script", fake_run_script)
+
+    with pytest.raises(NotesBridgeError) as exc_info:
+        bridge.update_note("note-1", title="New title")
+
+    assert exc_info.value.error_code == "NOTE_NOT_FOUND"
+
+
 def test_update_note_treats_empty_title_as_keep(monkeypatch) -> None:
     # Models send "" for unused optional strings: a move must not rename or
     # rewrite the body.

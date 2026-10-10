@@ -5,21 +5,21 @@ from typing import Any
 from .client import MCPToolCaller, call_tool_json
 
 
-async def files_move_path(
+async def files_copy_path(
     client: MCPToolCaller,
     source: str,
     destination: str
 ) -> Any:
-    """Files Move Path
+    """Copy Path
 
-    Move or rename a file or folder inside the allowed roots.
+    Copy a file, byte for byte, or a whole folder with everything in it to a new path inside the allowed roots. The destination must not exist; nothing is overwritten.
 
     Example:
-        await files_move_path(client, source='example_source', destination='example_destination')
+        await files_copy_path(client, source='example_source', destination='example_destination')
     """
     arguments = {
         "source": source,
         "destination": destination,
     }
     payload = {key: value for key, value in arguments.items() if value is not None}
-    return await call_tool_json(client, "files_move_path", payload)
+    return await call_tool_json(client, "files_copy_path", payload)

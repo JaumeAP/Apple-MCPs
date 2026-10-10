@@ -11,7 +11,7 @@ async def files_reveal_in_finder(
 ) -> Any:
     """Files Reveal In Finder
 
-    Delegated Apple domain tool 'files_reveal_in_finder' exposed through Apple-Tools-MCP.
+    Reveal a file or folder in Finder. Requires safe_manage or full_access safety mode.
 
     Example:
         await files_reveal_in_finder(client, path='/path/to/item')

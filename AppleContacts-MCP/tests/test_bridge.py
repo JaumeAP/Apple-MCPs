@@ -1,5 +1,4 @@
 import hashlib
-import os
 import shutil
 import subprocess
 import sys
@@ -409,6 +408,38 @@ def test_resolve_recipient_complete_value_ignores_partial_match_and_returns_quer
     assert result.recipient_value == target[methods_key][0]["value"]
 
 
+@pytest.mark.parametrize(
+    ("query", "holder"),
+    [
+        ("ann@example.com", contact_item("joann", email="joann@example.com")),
+        ("bob@x.com", contact_item("bob", email="bob@x.com.au")),
+        ("+15551234567", contact_item("ext", phone="+1 555 123 4567 ext. 89")),
+    ],
+)
+def test_resolve_recipient_complete_value_without_exact_owner_is_not_found(monkeypatch, query, holder) -> None:
+    # A message must never go to a different address that merely contains the query.
+    bridge = AppleContactsBridge(*UNUSED_HELPER)
+
+    def fake_run_script(script_name: str, *args: str) -> dict[str, object]:
+        assert script_name == "list_contacts.applescript"
+        return {"total": 1, "items": [holder]}
+
+    monkeypatch.setattr(bridge, "_run_script", fake_run_script)
+
+    with pytest.raises(ContactsBridgeError) as failure:
+        bridge.resolve_message_recipient(query, channel="any")
+    assert failure.value.error_code == "CONTACT_NOT_FOUND"
+
+
+def test_update_contact_refuses_blank_method_value() -> None:
+    from apple_contacts_mcp.models import ContactMethod
+
+    bridge = AppleContactsBridge(*UNUSED_HELPER)
+    with pytest.raises(ContactsBridgeError) as failure:
+        bridge.update_contact("id", first_name="Ann", phones=[ContactMethod(label="", value=chr(0x200B) + " ")])
+    assert failure.value.error_code == "INVALID_INPUT"
+
+
 def test_resolve_recipient_rejects_complete_value_held_by_two_contacts(monkeypatch) -> None:
     bridge = AppleContactsBridge(*UNUSED_HELPER)
     items = [contact_item("one", email="shared@example.com"), contact_item("two", email="Shared@Example.com")]
@@ -482,10 +513,13 @@ def test_ensure_helper_compiles_once_to_hashed_name(monkeypatch, tmp_path) -> No
     second = bridge._ensure_helper()
 
     expected = hashed_binary(bridge)
-    temporary = expected.with_name(f"{expected.name}.{os.getpid()}.tmp")
     assert first == second == expected
-    assert expected.exists() and not temporary.exists()
-    assert calls == [["swiftc", "-O", str(source), "-o", str(temporary)]]
+    assert expected.exists()
+    assert len(calls) == 1 and calls[0][:4] == ["swiftc", "-O", str(source), "-o"]
+    # A per-call temporary name, so threads of one process never collide, and none is left behind.
+    temporary = Path(calls[0][4])
+    assert temporary.parent == expected.parent and temporary.name.startswith(f"{expected.name}.") and temporary.suffix == ".tmp"
+    assert not temporary.exists()
 
 
 def test_ensure_helper_reuses_existing_hashed_binary(monkeypatch, tmp_path) -> None:

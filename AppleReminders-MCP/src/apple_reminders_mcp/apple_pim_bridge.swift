@@ -415,28 +415,39 @@ struct ApplePIMBridge {
     }
 
     // Every occurrence of a recurring series shares one calendarItemIdentifier,
-    // so the emitted id appends the occurrence start ("<id>@<ISO start>") to
-    // address that occurrence alone. Non-recurring events keep the bare id.
+    // so the emitted id appends the occurrence's original date
+    // ("<id>@<ISO occurrenceDate>") to address that occurrence alone. The
+    // original date stays fixed when the occurrence is moved, and no two
+    // occurrences share it. Non-recurring events keep the bare id.
     static func eventID(_ event: EKEvent) -> String {
         guard event.hasRecurrenceRules || event.isDetached else {
             return event.calendarItemIdentifier
         }
-        return "\(event.calendarItemIdentifier)@\(isoString(event.startDate))"
+        return "\(event.calendarItemIdentifier)@\(isoString(event.occurrenceDate ?? event.startDate))"
     }
 
     // Resolves an occurrence id from `eventID(_:)`. A bare id (older clients,
     // non-recurring events) resolves to the first occurrence of a series.
     static func resolveEvent(store: EKEventStore, eventID: String) -> EKEvent? {
         if let separator = eventID.lastIndex(of: "@"),
-           let start = isoFormatter.date(from: String(eventID[eventID.index(after: separator)...])) {
+           let occurrence = isoFormatter.date(from: String(eventID[eventID.index(after: separator)...])) {
             let baseID = String(eventID[..<separator])
             guard let series = store.calendarItem(withIdentifier: baseID) as? EKEvent else {
                 return nil
             }
-            let predicate = store.predicateForEvents(withStart: start, end: start.addingTimeInterval(1), calendars: [series.calendar])
-            return store.events(matching: predicate).first {
-                $0.calendarItemIdentifier == baseID && abs($0.startDate.timeIntervalSince(start)) < 1
+            func find(from start: Date, to end: Date) -> EKEvent? {
+                let predicate = store.predicateForEvents(withStart: start, end: end, calendars: [series.calendar])
+                return store.events(matching: predicate).first {
+                    $0.calendarItemIdentifier == baseID
+                        && abs(($0.occurrenceDate ?? $0.startDate).timeIntervalSince(occurrence)) < 1
+                }
             }
+            // An unmoved occurrence starts at its original date; a moved one is
+            // searched for within a year either side.
+            // ponytail: an occurrence moved more than a year away is not found.
+            let year: TimeInterval = 366 * 24 * 3600
+            return find(from: occurrence, to: occurrence.addingTimeInterval(1))
+                ?? find(from: occurrence.addingTimeInterval(-year), to: occurrence.addingTimeInterval(year))
         }
         // Emitted ids are calendarItemIdentifier values; eventIdentifier is
         // still accepted for ids stored by earlier versions.

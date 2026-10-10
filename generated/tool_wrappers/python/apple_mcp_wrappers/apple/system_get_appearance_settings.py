@@ -10,7 +10,7 @@ async def system_get_appearance_settings(
 ) -> Any:
     """System Get Appearance Settings
 
-    Delegated Apple domain tool 'system_get_appearance_settings' exposed through Apple-Tools-MCP.
+    Read current macOS appearance settings such as light or dark mode and accent color.
 
     Example:
         await system_get_appearance_settings(client)

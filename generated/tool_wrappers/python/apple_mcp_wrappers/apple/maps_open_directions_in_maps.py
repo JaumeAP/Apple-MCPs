@@ -13,7 +13,7 @@ async def maps_open_directions_in_maps(
 ) -> Any:
     """Maps Open Directions In Maps
 
-    Delegated Apple domain tool 'maps_open_directions_in_maps' exposed through Apple-Tools-MCP.
+    Open directions in the Apple Maps app.
 
     Example:
         await maps_open_directions_in_maps(client, destination='example_destination', origin='example_origin')

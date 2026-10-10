@@ -46,8 +46,12 @@ class ShortcutsBridge:
         resolved = Path(os.path.realpath(Path(path).expanduser()))
         folded = Path(str(resolved).lower())
         library = Path(os.path.realpath(Path.home() / "Library").lower())
-        library_roots = [Path(str(root).lower()) for root in self.allowed_roots]
-        library_roots = [root for root in library_roots if root.is_relative_to(library) and root != library]
+        folded_roots = [Path(str(root).lower()) for root in self.allowed_roots]
+        library_roots = [root for root in folded_roots if root.is_relative_to(library) and root != library]
+        # iCloud Drive stays reachable when a broader root (such as home) covers it.
+        icloud = Path(os.path.realpath(Path.home() / "Library/Mobile Documents/com~apple~CloudDocs").lower())
+        if any(icloud.is_relative_to(root) for root in folded_roots):
+            library_roots.append(icloud)
         if (
             any(part.startswith(".") for part in resolved.parts)
             or (folded.is_relative_to(library) and not any(folded.is_relative_to(root) for root in library_roots))

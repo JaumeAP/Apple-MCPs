@@ -3,7 +3,6 @@ from __future__ import annotations
 import base64
 import binascii
 import heapq
-import mimetypes
 import os
 import plistlib
 import shutil
@@ -37,15 +36,16 @@ class FilesBridge:
     # Executables, installers and documents that redirect `open` to another target.
     _UNSAFE_OPEN_SUFFIXES = frozenset(
         {
-            ".app", ".command", ".tool", ".terminal", ".sh", ".workflow", ".action",
+            ".app", ".command", ".tool", ".terminal", ".term", ".sh", ".workflow", ".action",
             ".scpt", ".scptd", ".applescript", ".pkg", ".mpkg", ".prefpane", ".shortcut",
-            ".webloc", ".fileloc", ".inetloc", ".url", ".jar", ".afploc", ".atloc", ".ftploc",
+            ".webloc", ".fileloc", ".inetloc", ".url", ".jar", ".class", ".jnlp", ".afploc", ".atloc", ".ftploc",
             ".mailloc", ".newsloc", ".nfsloc", ".smbloc", ".vncloc",
         }
     )
-    # Scripts that a default handler may run; the execute bit counts only for these and unknown types.
+    # Scripts that a default handler (Python Launcher and the like) may run: refused
+    # whatever their execute bit.
     _SCRIPT_SUFFIXES = frozenset(
-        {".py", ".pl", ".rb", ".zsh", ".bash", ".csh", ".tcsh", ".ksh", ".php", ".js", ".tcl", ".lua"}
+        {".py", ".pyc", ".pyw", ".pl", ".rb", ".zsh", ".bash", ".csh", ".tcsh", ".ksh", ".php", ".js", ".tcl", ".lua"}
     )
 
     def __init__(self, allowed_roots: tuple[Path, ...]) -> None:
@@ -281,7 +281,7 @@ class FilesBridge:
 
     def open_path(self, path: str) -> str:
         target = self._ensure_allowed(path)
-        if target.suffix.lower() in self._UNSAFE_OPEN_SUFFIXES:
+        if target.suffix.lower() in self._UNSAFE_OPEN_SUFFIXES | self._SCRIPT_SUFFIXES:
             raise FilesBridgeError(
                 "UNSAFE_OPEN_TARGET",
                 f"Refusing to open an executable, installer or link document: {target}",
@@ -293,10 +293,10 @@ class FilesBridge:
                     is_alias = handle.read(12) == b"book\0\0\0\0mark"
             except OSError as exc:
                 raise FilesBridgeError("READ_FAILED", f"Could not read {target}: {exc.strerror}", "Check the file permissions.") from exc
-            suffix = target.suffix.lower()
-            # Photos copied from exFAT are often +x; only scripts and untyped files count as executables.
-            runnable_type = suffix in self._SCRIPT_SUFFIXES or mimetypes.guess_type(target.name)[0] is None
-            if is_alias or (runnable_type and os.access(target, os.X_OK)):
+            # Any executable file is refused, whatever its type: a +x file with a
+            # known suffix (.class, .exe) can still reach a handler that runs it.
+            # Photos copied from exFAT are often +x too; reveal them in Finder instead.
+            if is_alias or os.access(target, os.X_OK):
                 raise FilesBridgeError(
                     "UNSAFE_OPEN_TARGET",
                     f"Refusing to open an executable file or Finder alias: {target}",

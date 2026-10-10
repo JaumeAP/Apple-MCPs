@@ -11,7 +11,7 @@ async def files_recent_files(
 ) -> Any:
     """Files Recent Files
 
-    Delegated Apple domain tool 'files_recent_files' exposed through Apple-Tools-MCP.
+    List recently modified files inside the allowed roots.
 
     Example:
         await files_recent_files(client, limit=1)

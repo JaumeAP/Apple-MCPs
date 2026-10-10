@@ -13,7 +13,15 @@ from pathlib import Path
 
 import pytest
 
-from apple_mcp_common.runtime import notify_resource_updated, notify_resources_changed, require_loopback_host
+from apple_mcp_common.runtime import notify_resource_updated, notify_resources_changed, require_loopback_host, swift_trim
+
+
+def test_swift_trim_matches_foundation_whitespace() -> None:
+    # Foundation trims U+200B, which str.strip() keeps, and keeps U+001C.
+    zwsp, ideographic_space = chr(0x200B), chr(0x3000)
+    assert swift_trim(f"{zwsp}{ideographic_space}ID-1\n{zwsp}") == "ID-1"
+    assert swift_trim("\x1cID") == "\x1cID"
+    assert swift_trim(zwsp) == ""
 
 
 @pytest.mark.parametrize("host", ["localhost", "127.0.0.1", "::1"])

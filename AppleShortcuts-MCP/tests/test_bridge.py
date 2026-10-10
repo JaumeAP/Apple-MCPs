@@ -173,3 +173,20 @@ def test_library_rule_ignores_case_and_yields_to_library_roots(monkeypatch, tmp_
         assert exc.error_code == "PATH_NOT_ALLOWED"
     else:
         raise AssertionError("Expected refusal for a hidden segment under a Library root")
+
+
+def test_home_root_still_reaches_icloud_drive(monkeypatch, tmp_path) -> None:
+    home = Path(os.path.realpath(tmp_path))
+    monkeypatch.setenv("HOME", str(home))
+    icloud = home / "Library" / "Mobile Documents" / "com~apple~CloudDocs"
+    icloud.mkdir(parents=True)
+    bridge = ShortcutsBridge(shortcuts_command="shortcuts", timeout_seconds=5)
+    bridge.allowed_roots = (home,)
+
+    assert bridge._confine_path(str(icloud / "in.txt")) == str(icloud / "in.txt")
+    try:
+        bridge._confine_path("~/Library/Keychains/x")
+    except ShortcutsBridgeError as exc:
+        assert exc.error_code == "PATH_NOT_ALLOWED"
+    else:
+        raise AssertionError("Expected refusal for ~/Library outside iCloud Drive")
