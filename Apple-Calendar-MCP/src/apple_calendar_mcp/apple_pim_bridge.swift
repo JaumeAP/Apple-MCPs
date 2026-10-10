@@ -1143,6 +1143,22 @@ struct ApplePIMBridge {
         guard let calendar = store.calendar(withIdentifier: listID) else {
             return BooleanMutationPayload(deleted: false, object_id: listID)
         }
+        // Calendar identifiers are shared between event calendars and reminder
+        // lists: never remove an event calendar (and its events) from here.
+        guard calendar.allowedEntityTypes.contains(.reminder) else {
+            throw BridgeFailure(
+                errorCode: "LIST_NOT_FOUND",
+                message: "No reminder list matched '\(listID)'.",
+                suggestion: "List reminder lists first to discover valid ids."
+            )
+        }
+        guard calendar.allowsContentModifications else {
+            throw BridgeFailure(
+                errorCode: "LIST_READ_ONLY",
+                message: "Reminder list '\(calendar.title)' does not allow modifications.",
+                suggestion: "Choose a reminder list that allows modifications."
+            )
+        }
         try store.removeCalendar(calendar, commit: true)
         return BooleanMutationPayload(deleted: true, object_id: listID)
     }

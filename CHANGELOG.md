@@ -6,6 +6,39 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 ## [Unreleased]
 
+## [1.0.5-jap.6] - 2026-10-10 (JaumeAP fork)
+
+### Security
+
+- Calendar: the JXA fallback ends osascript options with `--`, so an id
+  starting with `-e` is data, not code.
+- Shortcuts: `input_paths` and `output_path` are confined to allowed roots
+  (`APPLE_SHORTCUTS_MCP_ALLOWED_ROOTS`), hidden paths and `~/Library` are
+  refused, an existing output is never overwritten, and names follow `--`.
+- System: GUI input tools (type, press keys, click) need `full_access`, a
+  named target application, and refuse terminal apps; they are marked
+  destructive. `read_preference_domain` accepts domain names only, not paths.
+- Files: move never overwrites; `recent_files` parses NUL-separated output
+  and re-checks containment; `open` refuses executables, aliases and
+  `.webloc`-style redirects; text reads are capped at 1 MB and need a
+  regular file.
+- Reminders: deleting a list applies the allowlist and refuses event
+  calendars and read-only lists (also in the Calendar copy of the helper);
+  moves and `reminders://` resources honor the allowlist.
+- Notes, Messages, Shortcuts: an unrecognized safety mode falls back to
+  `safe_readonly` instead of `full_access`.
+- Notes: a rename with an empty body keeps the body; append refuses notes
+  with attachments; the folder allowlist fails closed; deleting a folder
+  needs `full_access`; the bulk list re-checks ids against concurrent edits.
+- Contacts: empty phone or email lists no longer erase a contact's methods;
+  recipient resolution returns `AMBIGUOUS_CONTACT` for any name with more
+  than one match.
+- Messages: LIKE wildcards are escaped and read limits are capped at 500.
+- Common: `require_loopback_host` accepts only `127.0.0.1`, `::1` and
+  `localhost`.
+- Calendar, Reminders, Maps: helper calls and the Swift compile have
+  timeouts, and the compile writes a temp file then renames it into place.
+
 ## [1.0.5] - 2026-09-25
 
 ### Security

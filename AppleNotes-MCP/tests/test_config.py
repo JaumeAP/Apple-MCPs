@@ -25,6 +25,23 @@ def test_load_settings_reads_script_timeout_from_env(monkeypatch) -> None:
         load_settings.cache_clear()
 
 
+def test_safety_mode_is_normalized_and_fails_closed(monkeypatch) -> None:
+    try:
+        monkeypatch.delenv("APPLE_NOTES_MCP_SAFETY_MODE", raising=False)
+        load_settings.cache_clear()
+        assert load_settings().safety_mode == "full_access"
+
+        monkeypatch.setenv("APPLE_NOTES_MCP_SAFETY_MODE", " Safe_Manage ")
+        load_settings.cache_clear()
+        assert load_settings().safety_mode == "safe_manage"
+
+        monkeypatch.setenv("APPLE_NOTES_MCP_SAFETY_MODE", "full-access")
+        load_settings.cache_clear()
+        assert load_settings().safety_mode == "safe_readonly"
+    finally:
+        load_settings.cache_clear()
+
+
 def test_load_settings_rejects_invalid_script_timeout(monkeypatch) -> None:
     load_settings.cache_clear()
     monkeypatch.setenv("APPLE_NOTES_MCP_SCRIPT_TIMEOUT_SECONDS", "0")

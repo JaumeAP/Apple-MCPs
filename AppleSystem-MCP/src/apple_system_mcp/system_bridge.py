@@ -39,6 +39,23 @@ class SystemBridge:
         "down": 125,
         "up": 126,
     }
+    _TERMINAL_APP_NAMES: ClassVar[frozenset[str]] = frozenset(
+        {"terminal", "iterm2", "iterm", "warp", "ghostty", "kitty", "alacritty", "wezterm"}
+    )
+    _TERMINAL_BUNDLE_IDS: ClassVar[frozenset[str]] = frozenset(
+        {
+            "com.apple.terminal",
+            "com.googlecode.iterm2",
+            "dev.warp.warp-stable",
+            "dev.warp.warp",
+            "com.mitchellh.ghostty",
+            "net.kovidgoyal.kitty",
+            "org.alacritty",
+            "io.alacritty",
+            "com.github.wez.wezterm",
+        }
+    )
+    _PREFERENCE_DOMAIN_PATTERN: ClassVar[re.Pattern[str]] = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*(\.[A-Za-z0-9_-]+)+")
 
     def __init__(self, apps_helper_source: Path | None = None, apps_helper_binary: Path | None = None) -> None:
         if apps_helper_source is None or apps_helper_binary is None:
@@ -215,6 +232,26 @@ class SystemBridge:
         else:
             payload = self._run_apps_helper("frontmost")
         return self._app_record(payload)
+
+    def _gui_input_target(self, application: str | None = None, bundle_id: str | None = None) -> AppRecord:
+        """Resolve the target of a GUI input action: a named, non-terminal application.
+
+        Clicks and keystrokes are never sent to whatever happens to be frontmost, and never
+        to a terminal, where typed text runs as a shell command.
+        """
+        if not (application and application.strip()) and not (bundle_id and bundle_id.strip()):
+            raise SystemBridgeError(
+                "INVALID_INPUT",
+                "application or bundle_id is required for GUI input actions.",
+                "Name the target application; GUI input is never sent to the frontmost app implicitly.",
+            )
+        requested_name = (application or "").strip().lower().removesuffix(".app")
+        if requested_name in self._TERMINAL_APP_NAMES or (bundle_id or "").strip().lower() in self._TERMINAL_BUNDLE_IDS:
+            raise SystemBridgeError("TERMINAL_TARGET_REFUSED", "GUI input to terminal applications is refused.", "Target a non-terminal application.")
+        target_app = self._target_application(application=application, bundle_id=bundle_id)
+        if target_app.name.strip().lower() in self._TERMINAL_APP_NAMES or (target_app.bundle_id or "").lower() in self._TERMINAL_BUNDLE_IDS:
+            raise SystemBridgeError("TERMINAL_TARGET_REFUSED", "GUI input to terminal applications is refused.", "Target a non-terminal application.")
+        return target_app
 
     def battery(self) -> BatteryStatus:
         raw = self._run("pmset", "-g", "batt")
@@ -430,7 +467,7 @@ class SystemBridge:
     def gui_click_menu_path(self, menu_path: list[str], application: str | None = None, bundle_id: str | None = None) -> AppRecord:
         if len(menu_path) < 2:
             raise SystemBridgeError("INVALID_INPUT", "menu_path must contain at least two items.", "Provide a top-level menu and a target item.")
-        target_app = self._target_application(application=application, bundle_id=bundle_id)
+        target_app = self._gui_input_target(application=application, bundle_id=bundle_id)
         self._run_osascript(
             [
                 "on run argv",
@@ -469,7 +506,7 @@ class SystemBridge:
         modifier_clause = ""
         if modifier_literals:
             modifier_clause = " using {" + ", ".join(modifier_literals) + "}"
-        target_app = self._target_application(application=application, bundle_id=bundle_id)
+        target_app = self._gui_input_target(application=application, bundle_id=bundle_id)
         key_value = key.strip()
         if not key_value:
             raise SystemBridgeError("INVALID_INPUT", "key must not be empty.", "Provide a printable key or supported special key name.")
@@ -495,7 +532,7 @@ class SystemBridge:
         return target_app
 
     def gui_type_text(self, text: str, application: str | None = None, bundle_id: str | None = None) -> AppRecord:
-        target_app = self._target_application(application=application, bundle_id=bundle_id)
+        target_app = self._gui_input_target(application=application, bundle_id=bundle_id)
         self._run_osascript(
             [
                 "on run argv",
@@ -525,7 +562,7 @@ class SystemBridge:
             raise SystemBridgeError("INVALID_INPUT", "label or description is required.", "Provide a button label or accessibility description.")
         if index < 1:
             raise SystemBridgeError("INVALID_INPUT", "index must be at least 1.", "Use a positive button index.")
-        target_app = self._target_application(application=application, bundle_id=bundle_id)
+        target_app = self._gui_input_target(application=application, bundle_id=bundle_id)
         self._run_osascript(
             [
                 "on run argv",
@@ -565,7 +602,7 @@ class SystemBridge:
     ) -> AppRecord:
         if not label and not description:
             raise SystemBridgeError("INVALID_INPUT", "label or description is required.", "Provide a pop-up label or accessibility description.")
-        target_app = self._target_application(application=application, bundle_id=bundle_id)
+        target_app = self._gui_input_target(application=application, bundle_id=bundle_id)
         self._run_osascript(
             [
                 "on run argv",
@@ -661,6 +698,16 @@ class SystemBridge:
         normalized_domain = domain.strip()
         if not normalized_domain:
             raise SystemBridgeError("INVALID_INPUT", "Preference domain must not be empty.", "Provide a valid macOS defaults domain.")
+        if normalized_domain == "-g":
+            normalized_domain = "NSGlobalDomain"
+        # `defaults export` also accepts a file path or an option, so only plain
+        # reverse-DNS domains (no '/', '~', leading '.' or '-') are passed through.
+        if normalized_domain != "NSGlobalDomain" and not self._PREFERENCE_DOMAIN_PATTERN.fullmatch(normalized_domain):
+            raise SystemBridgeError(
+                "INVALID_INPUT",
+                f"Invalid preference domain '{normalized_domain}'.",
+                "Use NSGlobalDomain or a reverse-DNS domain such as com.apple.dock; file paths are not accepted.",
+            )
         command = ["defaults"]
         if current_host:
             command.append("-currentHost")

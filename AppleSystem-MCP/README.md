@@ -129,7 +129,10 @@ The launch System write surface is explicit, not generic:
 - `system_set_increase_contrast`
 - `system_set_reduce_transparency`
 
-The bounded GUI fallback surface is:
+The bounded GUI fallback surface is below. Only `system_gui_list_menu_bar_items`
+runs under `safe_manage`; the tools that click or type need `full_access`, a named
+`application` or `bundle_id` (never the frontmost app implicitly), and refuse terminal
+apps (Terminal, iTerm2, Warp, Ghostty, kitty, Alacritty, WezTerm).
 
 - `system_gui_list_menu_bar_items`
 - `system_gui_click_menu_path`

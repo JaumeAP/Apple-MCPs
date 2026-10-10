@@ -1,22 +1,22 @@
 from __future__ import annotations
 
-import ipaddress
 from typing import Any
 
 from mcp_types.version import MODERN_PROTOCOL_VERSIONS
 
+CANONICAL_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+
 
 def require_loopback_host(host: str) -> str:
-    """Return a normalized loopback HTTP host or reject network exposure."""
-    normalized = host.strip()
-    if normalized.lower() == "localhost":
-        return normalized
-    try:
-        address = ipaddress.ip_address(normalized)
-    except ValueError as exc:
-        raise ValueError(f"Streamable HTTP host must be a loopback address, got {host!r}") from exc
-    if not address.is_loopback:
-        raise ValueError(f"Streamable HTTP host must be a loopback address, got {host!r}")
+    """Return a canonical loopback HTTP host or reject it.
+
+    Only the spellings the MCP SDK recognises for its DNS-rebinding guard are
+    accepted; other loopback forms (127.1, ::ffff:127.0.0.1, ...) would bind
+    locally but silently disable that guard.
+    """
+    normalized = host.strip().lower()
+    if normalized not in CANONICAL_LOOPBACK_HOSTS:
+        raise ValueError(f"Streamable HTTP host must be a loopback address (127.0.0.1, ::1 or localhost), got {host!r}")
     return normalized
 
 

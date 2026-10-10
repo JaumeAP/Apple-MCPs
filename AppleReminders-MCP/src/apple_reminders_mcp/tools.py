@@ -82,6 +82,18 @@ def _reminder_owner_list(reminder_id: str) -> str | None:
     return detail.list_name
 
 
+def _list_title(list_id: str) -> str | None:
+    for list_info in _bridge().list_lists():
+        if list_info.list_id == list_id:
+            return list_info.title
+    return None
+
+
+def _list_visible(list_name: str) -> bool:
+    allowed_lists = load_settings().allowed_lists
+    return not allowed_lists or list_name in allowed_lists
+
+
 @mcp.resource(
     "reminders://lists",
     name="reminder_lists",
@@ -91,7 +103,7 @@ def _reminder_owner_list(reminder_id: str) -> str | None:
     annotations=Annotations(audience=["assistant"], priority=0.9),
 )
 def reminders_lists_resource() -> str:
-    lists = _bridge().list_lists()
+    lists = [item for item in _bridge().list_lists() if _list_visible(item.title)]
     return _resource_json({"lists": [item.model_dump() for item in lists], "count": len(lists)})
 
 
@@ -104,7 +116,10 @@ def reminders_lists_resource() -> str:
     annotations=Annotations(audience=["assistant"], priority=0.8),
 )
 def reminders_today_resource() -> str:
-    reminders = _bridge().list_reminders(include_completed=False, limit=25)
+    # ponytail: filters after the 25-item limit, so an allowlist can shrink the snapshot below 25.
+    reminders = [
+        item for item in _bridge().list_reminders(include_completed=False, limit=25) if _list_visible(item.list_name)
+    ]
     return _resource_json({"reminders": [item.model_dump() for item in reminders], "count": len(reminders)})
 
 
@@ -218,7 +233,12 @@ def reminders_create_list(title: str) -> ReminderListMutationResponse | ErrorRes
 )
 def reminders_delete_list(list_id: str) -> DeleteReminderListResponse | ErrorResponse:
     try:
-        ensure_action_allowed("reminders_delete_list")
+        # Only ids that resolve to a reminder list are passed on, so the allowlist
+        # applies and a calendar id can never reach the helper.
+        list_title = _list_title(list_id)
+        ensure_action_allowed("reminders_delete_list", list_title)
+        if list_title is None:
+            return DeleteReminderListResponse(list_id=list_id, deleted=False)
         return _bridge().delete_list(list_id=list_id)
     except SafetyError as exc:
         return _error_response(exc.error_code, exc.message, exc.suggestion)
@@ -362,6 +382,15 @@ def reminders_update_reminder(
                 "Update the reminder without parent_reminder_id.",
             )
         ensure_action_allowed("reminders_update_reminder", _reminder_owner_list(reminder_id))
+        if list_id is not None:
+            destination_title = _list_title(list_id)
+            if destination_title is None:
+                return _error_response(
+                    "LIST_NOT_FOUND",
+                    f"No reminder list matched '{list_id}'.",
+                    "List reminder lists first to discover valid ids.",
+                )
+            ensure_action_allowed("reminders_update_reminder", destination_title)
         priority_value = _coerce_int_arg("priority", priority, minimum=0) if priority is not None else None
         detail = _bridge().update_reminder(
             reminder_id,

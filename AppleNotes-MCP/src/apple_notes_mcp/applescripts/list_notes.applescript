@@ -74,6 +74,11 @@ end note_json
 -- Reads each property for every note of the folder in one Apple Event per
 -- property instead of one per note and property. Errors (including a folder
 -- that changed between reads) propagate so the caller can fall back.
+-- The parallel lists are only paired by position, so the ids are read again
+-- after the other properties: any add, delete or reorder in between (an edit
+-- moves a note to the top) changes the id list and forces the per-note path,
+-- so a body is never paired with another note's id.
+-- ponytail: two id reads miss a reorder that is undone in between; read properties of every note.
 on folder_notes_json(accountId, accountName, folderId, folderName, fld)
 	tell application "Notes"
 		set noteIds to id of every note of fld
@@ -82,7 +87,9 @@ on folder_notes_json(accountId, accountName, folderId, folderName, fld)
 		set createdDates to creation date of every note of fld
 		set modifiedDates to modification date of every note of fld
 		set sharedValues to shared of every note of fld
+		set noteIdsAfter to id of every note of fld
 	end tell
+	if noteIdsAfter is not noteIds then error "Notes changed while the folder was being listed."
 	set noteCount to count of noteIds
 	repeat with propertyValues in {noteNames, notePlainTexts, createdDates, modifiedDates, sharedValues}
 		if (count of propertyValues) is not noteCount then error "Notes changed while the folder was being listed."
@@ -101,8 +108,8 @@ on folder_notes_json(accountId, accountName, folderId, folderName, fld)
 		end try
 		set sharedValue to item i of sharedValues
 		if sharedValue is not true then set sharedValue to false
-		-- ponytail: attachment count is still one Apple Event per note; Notes has no
-		-- reliable bulk form for a per-note element count.
+		-- Notes has no reliable bulk form for a per-note element count.
+		-- ponytail: attachment count is one Apple Event per note; batch it if Notes ever offers a bulk count.
 		try
 			tell application "Notes" to set attachmentCount to count of attachments of note id noteId
 		end try

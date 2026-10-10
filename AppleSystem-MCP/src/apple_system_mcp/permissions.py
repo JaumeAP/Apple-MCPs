@@ -45,6 +45,11 @@ MANAGE_ACTIONS = {
     "system_set_increase_contrast",
     "system_set_reduce_transparency",
     "system_gui_list_menu_bar_items",
+}
+
+# GUI actions that send clicks or keystrokes to another app can run arbitrary
+# commands (for example, typing into a shell), so they need full_access.
+FULL_ACCESS_ACTIONS = {
     "system_gui_click_menu_path",
     "system_gui_press_keys",
     "system_gui_type_text",
@@ -59,8 +64,10 @@ def ensure_action_allowed(action: str) -> None:
         return
     if action in MANAGE_ACTIONS and safety_mode in {"safe_manage", "full_access"}:
         return
+    if action in FULL_ACCESS_ACTIONS and safety_mode == "full_access":
+        return
     raise SafetyError(
         error_code="SAFETY_RESTRICTION",
         message=f"{action} is not allowed while APPLE_SYSTEM_MCP_SAFETY_MODE={safety_mode}.",
-        suggestion="Use safe_manage or full_access for system mutation tools.",
+        suggestion="Use full_access for GUI input tools, and safe_manage or full_access for other system mutation tools.",
     )

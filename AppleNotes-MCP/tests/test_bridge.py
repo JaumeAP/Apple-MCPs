@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from apple_notes_mcp.models import AttachmentInfo
 from apple_notes_mcp.notes_bridge import AppleNotesBridge, NotesBridgeError
 
 
@@ -472,3 +473,57 @@ def test_list_notes_bulk_fetches_properties_per_folder() -> None:
     assert "my folder_notes_json(accId, accName, fldId, fldName, fld)" in source
     # Per-note reads remain only as the fallback path.
     assert "my note_json(accId, accName, fldId, fldName, n)" in source
+
+
+def test_list_notes_bulk_read_rechecks_ids_after_properties() -> None:
+    # The bulk lists are paired by position: the ids must be re-read after the
+    # other properties and compared, so a reorder mid-read falls back instead
+    # of pairing a body with another note's id.
+    repo_root = Path(__file__).resolve().parents[1]
+    source = (repo_root / "src" / "apple_notes_mcp" / "applescripts" / "list_notes.applescript").read_text()
+    handler = source.split("on folder_notes_json(", 1)[1].split("end folder_notes_json", 1)[0]
+
+    assert handler.index("set noteIdsAfter to id of every note of fld") > handler.index("set sharedValues to shared of every note of fld")
+    assert 'if noteIdsAfter is not noteIds then error' in handler
+
+
+def test_update_note_treats_empty_body_as_keep_when_renaming(monkeypatch) -> None:
+    # Models send "" for unused optional strings; a rename must not erase the body.
+    bridge = AppleNotesBridge(Path("/tmp/scripts"))
+    bridge._folder_by_id = lambda folder_id: None  # type: ignore[method-assign]
+    monkeypatch.setattr(bridge, "list_attachments", lambda note_id: [])
+    existing = dict(_note_payload("note-1", "Old title"), body_html="<div>Old title</div><div>Keep me</div>")
+    sent: dict[str, tuple[str, ...]] = {}
+
+    def fake_run_script(script_name: str, *args: str) -> dict[str, object]:
+        if script_name == "get_note.applescript":
+            return {"found": True, "note": existing}
+        if script_name == "update_note.applescript":
+            sent["args"] = args
+            return {"note": existing}
+        raise AssertionError(f"Unexpected script: {script_name}")
+
+    monkeypatch.setattr(bridge, "_run_script", fake_run_script)
+
+    bridge.update_note("note-1", title="New title", body_html="")
+
+    assert "Keep me" in sent["args"][2]
+
+
+def test_append_to_note_refuses_note_with_attachments(monkeypatch) -> None:
+    # Appending rewrites the whole body via `set body`, which drops attachments.
+    bridge = AppleNotesBridge(Path("/tmp/scripts"))
+    bridge._folder_by_id = lambda folder_id: None  # type: ignore[method-assign]
+    monkeypatch.setattr(bridge, "list_attachments", lambda note_id: [AttachmentInfo(name="photo.jpg")])
+
+    def fake_run_script(script_name: str, *args: str) -> dict[str, object]:
+        if script_name == "get_note.applescript":
+            return {"found": True, "note": _note_payload("note-1", "Trip")}
+        raise AssertionError(f"Unexpected script: {script_name}")
+
+    monkeypatch.setattr(bridge, "_run_script", fake_run_script)
+
+    with pytest.raises(NotesBridgeError) as exc_info:
+        bridge.append_to_note("note-1", "<div>More</div>")
+
+    assert exc_info.value.error_code == "NOTE_HAS_ATTACHMENTS"

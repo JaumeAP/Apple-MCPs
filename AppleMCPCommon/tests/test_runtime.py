@@ -16,12 +16,15 @@ import pytest
 from apple_mcp_common.runtime import notify_resource_updated, notify_resources_changed, require_loopback_host
 
 
-@pytest.mark.parametrize("host", ["localhost", "127.0.0.1", "127.42.0.9", "::1"])
+@pytest.mark.parametrize("host", ["localhost", "127.0.0.1", "::1"])
 def test_require_loopback_host_accepts_local_addresses(host: str) -> None:
     assert require_loopback_host(host) == host
 
 
-@pytest.mark.parametrize("host", ["0.0.0.0", "::", "192.168.1.2", "example.com", ""])
+@pytest.mark.parametrize(
+    "host",
+    ["0.0.0.0", "::", "192.168.1.2", "example.com", "", "127.42.0.9", "127.1", "0x7f.0.0.1", "2130706433", "::ffff:127.0.0.1", "[::1]"],
+)
 def test_require_loopback_host_rejects_network_exposure(host: str) -> None:
     with pytest.raises(ValueError, match="loopback"):
         require_loopback_host(host)

@@ -1,6 +1,8 @@
 import json
+import os
 import plistlib
 import subprocess
+import uuid
 from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
@@ -19,6 +21,8 @@ class CalendarBridgeError(Exception):
 
 class CalendarBridge:
     _JXA_TIMEOUT_SECONDS = 30
+    _HELPER_TIMEOUT_SECONDS = 60
+    _COMPILE_TIMEOUT_SECONDS = 300
 
     def __init__(self, helper_source: Path, helper_binary: Path) -> None:
         self.helper_source = helper_source
@@ -381,7 +385,14 @@ class CalendarBridge:
                 capture_output=True,
                 text=True,
                 check=False,
+                timeout=self._HELPER_TIMEOUT_SECONDS,
             )
+        except subprocess.TimeoutExpired as exc:
+            raise CalendarBridgeError(
+                "HELPER_TIMEOUT",
+                "Native Calendar helper timed out.",
+                "Retry the request with a narrower calendar scope.",
+            ) from exc
         except OSError as exc:
             raise CalendarBridgeError(
                 "HELPER_UNAVAILABLE",
@@ -427,25 +438,39 @@ class CalendarBridge:
             return
 
         self.helper_binary.parent.mkdir(parents=True, exist_ok=True)
+        # Compile beside the final path and rename it into place, so a concurrent
+        # run never executes a half-written binary.
+        temp_binary = self.helper_binary.with_name(f".{self.helper_binary.name}.{uuid.uuid4().hex}.tmp")
         try:
-            completed = subprocess.run(
-                ["swiftc", "-parse-as-library", "-O", str(self.helper_source), "-o", str(self.helper_binary)],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-        except OSError as exc:
-            raise CalendarBridgeError(
-                "SWIFTC_UNAVAILABLE",
-                f"Could not run 'swiftc': {exc}.",
-                "This server requires macOS with the Swift toolchain (swiftc) available.",
-            ) from exc
-        if completed.returncode != 0:
-            raise CalendarBridgeError(
-                "HELPER_COMPILE_FAILED",
-                completed.stderr.strip() or completed.stdout.strip() or "Failed to compile the native helper.",
-                "Confirm Xcode command line tools and Swift are available, then retry.",
-            )
+            try:
+                completed = subprocess.run(
+                    ["swiftc", "-parse-as-library", "-O", str(self.helper_source), "-o", str(temp_binary)],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=self._COMPILE_TIMEOUT_SECONDS,
+                )
+            except subprocess.TimeoutExpired as exc:
+                raise CalendarBridgeError(
+                    "HELPER_COMPILE_TIMEOUT",
+                    "Compiling the native helper timed out.",
+                    "Confirm Xcode command line tools and Swift are available, then retry.",
+                ) from exc
+            except OSError as exc:
+                raise CalendarBridgeError(
+                    "SWIFTC_UNAVAILABLE",
+                    f"Could not run 'swiftc': {exc}.",
+                    "This server requires macOS with the Swift toolchain (swiftc) available.",
+                ) from exc
+            if completed.returncode != 0:
+                raise CalendarBridgeError(
+                    "HELPER_COMPILE_FAILED",
+                    completed.stderr.strip() or completed.stdout.strip() or "Failed to compile the native helper.",
+                    "Confirm Xcode command line tools and Swift are available, then retry.",
+                )
+            os.replace(temp_binary, self.helper_binary)
+        finally:
+            temp_binary.unlink(missing_ok=True)
         self._write_bundle_info_plist(info_plist)
 
     def _bundle_info_plist_path(self) -> Path:
@@ -1011,7 +1036,7 @@ function run(argv) {
     def _run_jxa(self, script: str, *args: str, timeout: int = _JXA_TIMEOUT_SECONDS) -> dict[str, object]:
         try:
             completed = subprocess.run(
-                ["osascript", "-l", "JavaScript", "-e", script, *args],
+                ["osascript", "-l", "JavaScript", "-e", script, "--", *args],
                 capture_output=True,
                 text=True,
                 check=False,
