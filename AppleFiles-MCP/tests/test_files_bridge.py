@@ -50,6 +50,46 @@ def test_move_path_refuses_existing_destination(tmp_path) -> None:
     assert source.exists()
 
 
+def test_copy_path_copies_binary_and_keeps_source(tmp_path) -> None:
+    source = tmp_path / "invoice.doc"
+    payload = bytes(range(256)) * 64  # every byte value, as in an OLE .doc
+    source.write_bytes(payload)
+    destination = tmp_path / "copy" / "invoice.doc"
+    destination.parent.mkdir()
+    bridge = FilesBridge((tmp_path,))
+
+    original, copied = bridge.copy_path(str(source), str(destination))
+
+    assert (original, copied) == (str(source.resolve()), str(destination.resolve()))
+    assert destination.read_bytes() == payload
+    assert source.read_bytes() == payload
+    assert destination.stat().st_mtime == source.stat().st_mtime
+
+
+def test_copy_path_refuses_existing_destination_folder_and_outside_root(tmp_path) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    source = root / "a.txt"
+    source.write_text("new")
+    existing = root / "b.txt"
+    existing.write_text("keep")
+    bridge = FilesBridge((root,))
+
+    with pytest.raises(FilesBridgeError) as excinfo:
+        bridge.copy_path(str(source), str(existing))
+    assert excinfo.value.error_code == "DESTINATION_EXISTS"
+    assert existing.read_text() == "keep"
+
+    with pytest.raises(FilesBridgeError) as excinfo:
+        bridge.copy_path(str(root), str(root / "folder-copy"))
+    assert excinfo.value.error_code == "NOT_A_FILE"
+
+    with pytest.raises(FilesBridgeError) as excinfo:
+        bridge.copy_path(str(source), str(tmp_path / "outside.txt"))
+    assert excinfo.value.error_code == "PATH_NOT_ALLOWED"
+    assert not (tmp_path / "outside.txt").exists()
+
+
 def test_recent_files_ignores_injected_paths_outside_roots(tmp_path) -> None:
     root = tmp_path / "root"
     root.mkdir()
