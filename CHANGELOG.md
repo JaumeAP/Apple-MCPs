@@ -6,6 +6,14 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 ## [Unreleased]
 
+## [1.0.5-jap.8] - 2026-10-10 (JaumeAP fork)
+
+### Changed
+
+- The plugin runs apple-system with `APPLE_SYSTEM_MCP_SAFETY_MODE=full_access`,
+  so the GUI input tools (type, press keys, click) are available again. They
+  still need a named target application and refuse terminal apps.
+
 ## [1.0.5-jap.7] - 2026-10-10 (JaumeAP fork)
 
 ### Security
