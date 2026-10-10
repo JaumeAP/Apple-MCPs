@@ -6,6 +6,15 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 ## [Unreleased]
 
+## [1.0.5-jap.10] - 2026-10-10 (JaumeAP fork)
+
+### Security
+
+- The plugin no longer starts the apple-files server. MCP servers run outside
+  the Claude Code Bash sandbox, so apple-files could read folders the sandbox
+  denies (such as `~/Documents`). The `AppleFiles-MCP` package stays in the
+  repository; only the plugin entry is removed.
+
 ## [1.0.5-jap.9] - 2026-10-10 (JaumeAP fork)
 
 ### Security
