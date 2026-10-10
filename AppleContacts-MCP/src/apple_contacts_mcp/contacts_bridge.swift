@@ -21,7 +21,8 @@
 //
 // When APPLE_CONTACTS_MCP_BACKUP_DIR is set, update_contact and delete_contact first
 // save the contact there as a .vcf file (owner-only, 0600, in a 0700 directory).
-// When macOS refuses the vCard export, a partial .json record is saved instead.
+// When macOS refuses the vCard export, update_contact falls back to a partial .json
+// record and delete_contact refuses to run.
 import Contacts
 import Foundation
 
@@ -174,7 +175,9 @@ func writeNewFile(_ data: Data, dir: URL, name: String, ext: String) throws {
     }
 }
 
-func backup(_ contact: CNContact) {
+// With requireVCard, a refused vCard export stops the change instead of falling
+// back to the partial JSON record: a delete must not lose fields the JSON lacks.
+func backup(_ contact: CNContact, requireVCard: Bool = false) {
     guard let rawDir = ProcessInfo.processInfo.environment["APPLE_CONTACTS_MCP_BACKUP_DIR"], !rawDir.isEmpty else {
         return
     }
@@ -190,8 +193,9 @@ func backup(_ contact: CNContact) {
         if let full = try? store.unifiedContact(withIdentifier: contact.identifier, keysToFetch: vCardKeys),
            let data = try? CNContactVCardSerialization.data(with: [full]) {
             try writeNewFile(data, dir: dir, name: name, ext: "vcf")
+        } else if requireVCard {
+            fail("Backup failed, nothing was changed: macOS refused the vCard export, and a partial backup is not enough for a delete. Unset APPLE_CONTACTS_MCP_BACKUP_DIR to delete without a backup.")
         } else {
-            // ponytail: the vCard keys likely need the notes entitlement, so this partial JSON may be the usual path; verify on a real Mac.
             let data = try JSONSerialization.data(withJSONObject: personJSON(contact), options: [.prettyPrinted, .sortedKeys])
             try writeNewFile(data, dir: dir, name: name, ext: "json")
         }
@@ -314,7 +318,7 @@ case "delete_contact":
         emit(["contact_id": id, "deleted": false])
         exit(0)
     }
-    backup(original)
+    backup(original, requireVCard: true)
     let request = CNSaveRequest()
     request.delete(original.mutableCopy() as! CNMutableContact)
     execute(request)

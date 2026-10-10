@@ -6,6 +6,15 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 ## [Unreleased]
 
+## [1.0.5-jap.9] - 2026-10-10 (JaumeAP fork)
+
+### Security
+
+- Contacts: with `APPLE_CONTACTS_MCP_BACKUP_DIR` set, a delete whose vCard
+  backup cannot be exported is refused with no change made, instead of
+  keeping only a partial JSON backup. Verified on a real Mac that the vCard
+  export works (the delete backup is a 0600 `.vcf`).
+
 ## [1.0.5-jap.8] - 2026-10-10 (JaumeAP fork)
 
 ### Changed
