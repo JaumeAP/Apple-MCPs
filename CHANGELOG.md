@@ -6,6 +6,14 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 ## [Unreleased]
 
+## [1.0.5-jap.15] - 2026-10-10 (JaumeAP fork)
+
+### Added
+
+- Files: `files_copy_path` copies a file byte for byte, binary files included,
+  to a new path inside the allowed roots. It never overwrites an existing
+  destination, does not copy folders, and needs `safe_manage` or `full_access`.
+
 ## [1.0.5-jap.14] - 2026-10-10 (JaumeAP fork)
 
 ### Changed

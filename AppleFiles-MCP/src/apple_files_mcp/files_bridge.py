@@ -4,6 +4,7 @@ import heapq
 import mimetypes
 import os
 import plistlib
+import shutil
 import stat
 import subprocess
 from dataclasses import dataclass
@@ -384,6 +385,24 @@ class FilesBridge:
             )
         # ponytail: check-then-rename race; use renamex_np(RENAME_EXCL) via ctypes if concurrent writers matter.
         source_path.rename(destination_path)
+        return str(source_path), str(destination_path)
+
+    def copy_path(self, source: str, destination: str) -> tuple[str, str]:
+        source_path = self._ensure_allowed(source)
+        destination_path = self._ensure_allowed(destination, allow_missing=True)
+        if not source_path.is_file():
+            raise FilesBridgeError("NOT_A_FILE", f"Not a regular file: {source_path}", "Copy files one by one; folders are not copied.")
+        # Exclusive create: an existing destination is never overwritten.
+        try:
+            with source_path.open("rb") as reader, destination_path.open("xb") as writer:
+                shutil.copyfileobj(reader, writer)
+        except FileExistsError as exc:
+            raise FilesBridgeError(
+                "DESTINATION_EXISTS",
+                f"Destination already exists: {destination_path}",
+                "Choose a destination path that does not exist yet.",
+            ) from exc
+        shutil.copystat(source_path, destination_path)
         return str(source_path), str(destination_path)
 
     def delete_path(self, path: str) -> str:

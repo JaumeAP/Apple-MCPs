@@ -142,7 +142,7 @@ def files_health() -> HealthResponse:
         "prompts",
     ]
     if settings.safety_mode in {"safe_manage", "full_access"}:
-        capabilities.extend(["create_folder", "move_path", "open_path", "reveal_in_finder", "set_tags", "add_tags", "remove_tags"])
+        capabilities.extend(["create_folder", "move_path", "copy_path", "open_path", "reveal_in_finder", "set_tags", "add_tags", "remove_tags"])
     if settings.safety_mode == "full_access":
         capabilities.append("delete_path")
     return HealthResponse(
@@ -416,6 +416,22 @@ async def files_move_path(source: str, destination: str, ctx: Context) -> FileMu
         original, moved = _bridge().move_path(source=source, destination=destination)
         await notify_resources_changed(ctx)
         return FileMutationResponse(path=original, destination=moved, action="moved")
+    except (SafetyError, FilesBridgeError, OSError) as exc:
+        return _exception_response(exc)
+
+
+@mcp.tool(
+    title="Copy Path",
+    description="Copy a file, byte for byte, to a new path inside the allowed roots. Never overwrites.",
+    annotations=ToolAnnotations(destructive_hint=False, idempotent_hint=False, open_world_hint=False),
+    structured_output=True,
+)
+async def files_copy_path(source: str, destination: str, ctx: Context) -> FileMutationResponse | ErrorResponse:
+    try:
+        ensure_action_allowed("files_copy_path")
+        original, copied = _bridge().copy_path(source=source, destination=destination)
+        await notify_resources_changed(ctx)
+        return FileMutationResponse(path=original, destination=copied, action="copied")
     except (SafetyError, FilesBridgeError, OSError) as exc:
         return _exception_response(exc)
 
