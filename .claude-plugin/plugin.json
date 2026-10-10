@@ -1,6 +1,6 @@
 {
   "name": "apple-mcps",
-  "version": "1.0.5-jap.7",
+  "version": "1.0.5-jap.8",
   "description": "Apple apps on macOS: Contacts (native helper instead of AppleScript), Reminders, Calendar, Maps, Files, Shortcuts, System, Notes and Messages.",
   "author": {
     "name": "Jonathan Reed (upstream); native Contacts helper by JaumeAP"
@@ -48,7 +48,10 @@
     },
     "apple-system": {
       "command": "uv",
-      "args": ["run", "--directory", "${CLAUDE_PLUGIN_ROOT}/AppleSystem-MCP", "apple-system-mcp"]
+      "args": ["run", "--directory", "${CLAUDE_PLUGIN_ROOT}/AppleSystem-MCP", "apple-system-mcp"],
+      "env": {
+        "APPLE_SYSTEM_MCP_SAFETY_MODE": "full_access"
+      }
     },
     "apple-notes": {
       "command": "uv",
