@@ -1,7 +1,7 @@
 {
   "name": "apple-mcps",
-  "version": "1.0.5-jap.4",
-  "description": "Apple apps on macOS: Contacts (native helper instead of AppleScript), Reminders, Calendar, Maps, Files, Shortcuts, System, Notes, Messages and Mail.",
+  "version": "1.0.5-jap.5",
+  "description": "Apple apps on macOS: Contacts (native helper instead of AppleScript), Reminders, Calendar, Maps, Files, Shortcuts, System, Notes and Messages.",
   "author": {
     "name": "Jonathan Reed (upstream); native Contacts helper by JaumeAP"
   },
@@ -60,13 +60,6 @@
     "apple-messages": {
       "command": "uv",
       "args": ["run", "--directory", "${CLAUDE_PLUGIN_ROOT}/AppleMessages-MCP", "apple-messages-mcp"]
-    },
-    "apple-mail": {
-      "command": "uv",
-      "args": ["run", "--directory", "${CLAUDE_PLUGIN_ROOT}/AppleMail-MCP", "apple-mail-mcp"],
-      "env": {
-        "APPLE_MAIL_MCP_SAFETY_PROFILE": "full_access"
-      }
     }
   }
 }
