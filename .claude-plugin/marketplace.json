@@ -8,7 +8,7 @@
   "plugins": [
     {
       "name": "apple-mcps",
-      "description": "Apple apps on macOS: Contacts, Reminders, Calendar, Maps, Files, Shortcuts, System, Notes and Messages.",
+      "description": "Apple apps on macOS: Contacts, Reminders, Calendar, Maps, Files, Shortcuts, System, Notes, Messages and Mail.",
       "source": "./",
       "category": "productivity"
     }
