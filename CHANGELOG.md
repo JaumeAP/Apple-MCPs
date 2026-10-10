@@ -6,6 +6,13 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 ## [Unreleased]
 
+## [1.0.5-jap.13] - 2026-10-10 (JaumeAP fork)
+
+### Changed
+
+- The plugin starts the apple-files server again (reverts the removal in
+  1.0.5-jap.10), to test file writes into folders the Bash sandbox denies.
+
 ## [1.0.5-jap.12] - 2026-10-10 (JaumeAP fork)
 
 Fixes from a `/code-review max` of the security-audit changes.
