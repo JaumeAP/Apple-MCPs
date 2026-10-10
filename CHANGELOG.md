@@ -6,6 +6,15 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 ## [Unreleased]
 
+## [1.0.5-jap.11] - 2026-10-10 (JaumeAP fork)
+
+### Security
+
+- Reverted 1.0.5-jap.8: the plugin runs apple-system in its default mode
+  again, so the GUI input tools are unavailable. Their terminal deny-list
+  does not stop typed code through Script Editor, Automator or an editor's
+  terminal, and keystrokes go to whatever app is frontmost.
+
 ## [1.0.5-jap.10] - 2026-10-10 (JaumeAP fork)
 
 ### Security
