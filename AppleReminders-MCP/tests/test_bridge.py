@@ -1,8 +1,49 @@
+import subprocess
 from pathlib import Path
 
 import pytest
 
+from apple_reminders_mcp import reminders_bridge
 from apple_reminders_mcp.reminders_bridge import RemindersBridge, RemindersBridgeError
+
+
+def test_run_helper_maps_timeout(monkeypatch) -> None:
+    bridge = RemindersBridge(Path("/tmp/source.swift"), Path("/tmp/helper"))
+    monkeypatch.setattr(bridge, "_ensure_helper", lambda: None)
+
+    def fake_run(command, **kwargs):
+        assert kwargs["timeout"] == bridge._HELPER_TIMEOUT_SECONDS
+        raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+
+    monkeypatch.setattr(reminders_bridge.subprocess, "run", fake_run)
+
+    with pytest.raises(RemindersBridgeError) as excinfo:
+        bridge.list_lists()
+    assert excinfo.value.error_code == "HELPER_TIMEOUT"
+
+
+def test_ensure_helper_compiles_to_temp_file_then_replaces(monkeypatch, tmp_path) -> None:
+    source = tmp_path / "bridge.swift"
+    source.write_text("// source")
+    binary = tmp_path / "bin" / "helper"
+    bridge = RemindersBridge(source, binary)
+    outputs: list[Path] = []
+
+    def fake_run(command, **kwargs):
+        assert kwargs["timeout"] == bridge._COMPILE_TIMEOUT_SECONDS
+        output = Path(command[command.index("-o") + 1])
+        outputs.append(output)
+        assert not binary.exists()
+        output.write_text("compiled")
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(reminders_bridge.subprocess, "run", fake_run)
+    bridge._ensure_helper()
+
+    assert outputs[0] != binary
+    assert outputs[0].parent == binary.parent
+    assert binary.read_text() == "compiled"
+    assert not outputs[0].exists()
 
 
 @pytest.mark.parametrize("deleted", [True, False])

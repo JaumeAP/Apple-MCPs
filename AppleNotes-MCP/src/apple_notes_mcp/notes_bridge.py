@@ -135,6 +135,10 @@ class AppleNotesBridge:
         folder_id: str | None = None,
         tags: list[str] | None = None,
     ) -> NoteDetail:
+        # Models send "" for unused optional strings: "" means "keep the body",
+        # exactly like None, never "erase it".
+        if body_html == "":
+            body_html = None
         prepared_body_html = body_html
         if title is not None:
             body_source = body_html
@@ -162,7 +166,15 @@ class AppleNotesBridge:
         return self.update_note(note_id, folder_id=folder_id)
 
     def append_to_note(self, note_id: str, body_html: str) -> NoteDetail:
+        # Notes' AppleScript has no true append: the whole body is rewritten
+        # with `set body`, which would drop attachments. Refuse those notes.
         current = self.get_note(note_id)
+        if current.attachments:
+            raise NotesBridgeError(
+                "NOTE_HAS_ATTACHMENTS",
+                f"Note '{note_id}' has {len(current.attachments)} attachment(s); appending rewrites the whole body and would lose them.",
+                "Append to this note in Notes.app directly, or create a new note instead.",
+            )
         existing_html = current.body_html or self._html_from_plaintext(current.plaintext)
         combined_html = existing_html + body_html
         return self.update_note(note_id, title=current.title, body_html=combined_html)

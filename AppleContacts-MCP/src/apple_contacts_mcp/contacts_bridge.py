@@ -104,31 +104,19 @@ class AppleContactsBridge:
     def resolve_message_recipient(self, query: str, channel: str = "phone") -> ResolvedRecipientResponse:
         if channel not in {"phone", "email", "any"}:
             raise ContactsBridgeError("INVALID_INPUT", f"Unsupported channel '{channel}'.", "Use 'phone', 'email', or 'any'.")
-        matches = self.search_contacts(query, limit=10)
+        # Two results are enough to prove ambiguity: a message must never go to a
+        # contact picked from several matches.
+        matches = self.search_contacts(query, limit=2)
         if not matches:
             raise ContactsBridgeError("CONTACT_NOT_FOUND", f"No contact matched '{query}'.", "Search contacts first to discover a valid contact.")
-
-        query_text = query.strip().lower()
-        normalized_query = self._normalize_lookup_value(query)
-        exact_matches = [contact for contact in matches if self._is_exact_match(contact, query_text, normalized_query)]
-        if len(exact_matches) > 1:
-            raise ContactsBridgeError(
-                "AMBIGUOUS_CONTACT",
-                f"Multiple contacts matched '{query}'.",
-                "Use contacts_search_contacts first, then choose a specific contact_id.",
-            )
-        if len(exact_matches) == 1:
-            selected = exact_matches[0]
-        elif len(matches) == 1:
-            selected = matches[0]
-        else:
+        if len(matches) > 1:
             raise ContactsBridgeError(
                 "AMBIGUOUS_CONTACT",
                 f"Multiple contacts matched '{query}'.",
                 "Use contacts_search_contacts first, then choose a specific contact_id.",
             )
 
-        detail = self.get_contact(selected.contact_id)
+        detail = self.get_contact(matches[0].contact_id)
         recipient_kind, recipient = self._choose_recipient(detail, channel, query=query)
         return ResolvedRecipientResponse(
             contact=detail,
@@ -179,8 +167,9 @@ class AppleContactsBridge:
             first_name,
             last_name,
             organization,
-            self._serialize_methods(phones) if phones is not None else NO_CHANGE_SENTINEL,
-            self._serialize_methods(emails) if emails is not None else NO_CHANGE_SENTINEL,
+            # An empty list means no change too: update must never erase every method.
+            self._serialize_methods(phones) if phones else NO_CHANGE_SENTINEL,
+            self._serialize_methods(emails) if emails else NO_CHANGE_SENTINEL,
             note,
         )
         if not payload.get("updated", False):
@@ -568,7 +557,10 @@ class AppleContactsBridge:
             return True
         if contact.organization and query_text == contact.organization.lower():
             return True
-        return any(self._normalize_lookup_value(method.value) == normalized_query for method in [*contact.phones, *contact.emails])
+        # An empty normalized query (a letters-only name) must not equal a digitless phone.
+        return bool(normalized_query) and any(
+            self._normalize_lookup_value(method.value) == normalized_query for method in [*contact.phones, *contact.emails]
+        )
 
     def _is_partial_match(self, contact: ContactSummary, query_text: str, normalized_query: str) -> bool:
         parts = self._phone_query_parts(query_text)

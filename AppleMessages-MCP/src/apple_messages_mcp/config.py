@@ -29,9 +29,10 @@ def _parse_attachment_roots(value: str | None) -> tuple[Path, ...]:
 
 @lru_cache(maxsize=1)
 def load_settings() -> Settings:
-    raw_safety_mode = os.environ.get("APPLE_MESSAGES_MCP_SAFETY_MODE", "full_access").strip() or "full_access"
+    raw_safety_mode = os.environ.get("APPLE_MESSAGES_MCP_SAFETY_MODE", "full_access").strip().lower() or "full_access"
     if raw_safety_mode not in VALID_SAFETY_MODES:
-        raw_safety_mode = "full_access"
+        # Fail closed: a mistyped mode must never leave sending enabled.
+        raw_safety_mode = "safe_readonly"
 
     return Settings(
         server_name="Apple Messages MCP",

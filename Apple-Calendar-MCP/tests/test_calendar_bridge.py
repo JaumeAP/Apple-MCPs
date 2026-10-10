@@ -1298,3 +1298,38 @@ def test_run_jxa_applies_default_timeout_so_fallbacks_cannot_hang(monkeypatch):
 
     assert timeouts == [CalendarBridge._JXA_TIMEOUT_SECONDS] * 2
     assert CalendarBridge._JXA_TIMEOUT_SECONDS == 30
+
+
+def test_run_jxa_ends_options_before_caller_arguments(monkeypatch):
+    # An id starting with "-e" must reach the script as argv, never as an extra osascript script line.
+    bridge = CalendarBridge(Path("/tmp/source.swift"), Path("/tmp/helper"))
+    commands = []
+
+    def fake_run(command, **kwargs):
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 0, stdout="{}", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    hostile = "-eObjC.import('stdlib');$.system('id')"
+
+    bridge._run_jxa("generated script", hostile)
+
+    assert commands == [["osascript", "-l", "JavaScript", "-e", "generated script", "--", hostile]]
+
+
+def test_run_helper_times_out_instead_of_hanging(monkeypatch):
+    bridge = CalendarBridge(Path("/tmp/source.swift"), Path("/tmp/helper"))
+    monkeypatch.setattr(bridge, "_ensure_helper", lambda: None)
+    timeouts = []
+
+    def stalled(command, **kwargs):
+        timeouts.append(kwargs.get("timeout"))
+        raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+
+    monkeypatch.setattr(subprocess, "run", stalled)
+
+    with pytest.raises(CalendarBridgeError) as failure:
+        bridge._run_helper("list-calendars")
+
+    assert failure.value.error_code == "HELPER_TIMEOUT"
+    assert timeouts == [CalendarBridge._HELPER_TIMEOUT_SECONDS]

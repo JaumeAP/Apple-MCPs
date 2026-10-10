@@ -1,4 +1,5 @@
 import os
+import tempfile
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -20,6 +21,7 @@ class Settings:
     shortcuts_command: str
     command_timeout_seconds: int
     scripts_root: Path
+    allowed_roots: tuple[Path, ...]
 
 
 def _parse_int(value: str | None, default: int) -> int:
@@ -31,12 +33,29 @@ def _parse_int(value: str | None, default: int) -> int:
         return default
 
 
+def _default_roots() -> tuple[Path, ...]:
+    home = Path.home()
+    return (
+        home / "Desktop",
+        home / "Documents",
+        home / "Downloads",
+        home / "Library" / "Mobile Documents" / "com~apple~CloudDocs",
+        Path(tempfile.gettempdir()),
+    )
+
+
+def _parse_roots(value: str | None) -> tuple[Path, ...]:
+    roots = [Path(raw.strip()).expanduser() for raw in (value or "").split(",") if raw.strip()]
+    return tuple(roots) or _default_roots()
+
+
 @lru_cache(maxsize=1)
 def load_settings() -> Settings:
     root_dir = Path(__file__).resolve().parents[2]
-    raw_safety_mode = os.environ.get("APPLE_SHORTCUTS_MCP_SAFETY_MODE", "full_access").strip() or "full_access"
+    raw_safety_mode = os.environ.get("APPLE_SHORTCUTS_MCP_SAFETY_MODE", "full_access").strip().lower() or "full_access"
     if raw_safety_mode not in VALID_SAFETY_MODES:
-        raw_safety_mode = "full_access"
+        # Fail closed: an unrecognized mode gets the most restrictive one.
+        raw_safety_mode = "safe_readonly"
 
     return Settings(
         server_name="Apple Shortcuts MCP",
@@ -49,4 +68,5 @@ def load_settings() -> Settings:
         shortcuts_command=os.environ.get("APPLE_SHORTCUTS_MCP_SHORTCUTS_COMMAND", "shortcuts").strip() or "shortcuts",
         command_timeout_seconds=_parse_int(os.environ.get("APPLE_SHORTCUTS_MCP_COMMAND_TIMEOUT_SECONDS"), 300),
         scripts_root=root_dir,
+        allowed_roots=_parse_roots(os.environ.get("APPLE_SHORTCUTS_MCP_ALLOWED_ROOTS")),
     )

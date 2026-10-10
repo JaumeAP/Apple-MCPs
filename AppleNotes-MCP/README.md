@@ -88,6 +88,8 @@ claude mcp add --transport stdio --scope project apple-notes -- uvx apple-mcp-no
 - `safe_manage`
 - `full_access`
 
+`notes_delete_folder` deletes every note inside the folder, so it needs `full_access`. An unrecognized mode falls back to `safe_readonly`.
+
 ## Transport
 
 `stdio` is the default and recommended transport. Set `APPLE_NOTES_MCP_TRANSPORT=streamable-http` (with optional `APPLE_NOTES_MCP_HOST` and `APPLE_NOTES_MCP_PORT`) to serve Streamable HTTP instead.

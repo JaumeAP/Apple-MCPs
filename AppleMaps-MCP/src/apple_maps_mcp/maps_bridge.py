@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -35,14 +36,17 @@ class AppleMapsBridge:
         self.helper_binary.parent.mkdir(parents=True, exist_ok=True)
         if self.helper_binary.exists() and self.helper_binary.stat().st_mtime >= self.helper_source.stat().st_mtime:
             return
+        # Compile beside the target and rename atomically, so a concurrent caller never runs a half-written binary.
+        temp_binary = self.helper_binary.with_name(f".{self.helper_binary.name}.{os.getpid()}.tmp")
         try:
             subprocess.run(
-                ["swiftc", "-parse-as-library", "-O", str(self.helper_source), "-o", str(self.helper_binary)],
+                ["swiftc", "-parse-as-library", "-O", str(self.helper_source), "-o", str(temp_binary)],
                 capture_output=True,
                 check=True,
                 text=True,
                 timeout=self.timeout_seconds,
             )
+            os.replace(temp_binary, self.helper_binary)
         except subprocess.TimeoutExpired as exc:
             raise MapsBridgeError(
                 "HELPER_COMPILE_TIMEOUT",
@@ -62,6 +66,8 @@ class AppleMapsBridge:
                 stderr or "Failed to compile the Apple Maps helper.",
                 "Install Xcode command line tools and retry.",
             ) from exc
+        finally:
+            temp_binary.unlink(missing_ok=True)
 
     def _run_helper(self, command: str, payload: dict[str, object]) -> dict[str, object]:
         self._ensure_helper()

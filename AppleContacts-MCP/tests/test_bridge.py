@@ -342,6 +342,43 @@ def test_update_contact_supports_no_change_sentinel(monkeypatch) -> None:
     assert calls[0][1][5] == "__NOCHANGE__"
 
 
+def test_update_contact_treats_empty_method_lists_as_no_change(monkeypatch) -> None:
+    bridge = AppleContactsBridge(*UNUSED_HELPER)
+    calls: list[tuple[str, tuple[str, ...]]] = []
+
+    def fake_run_script(script_name: str, *args: str) -> dict[str, object]:
+        calls.append((script_name, args))
+        if script_name == "update_contact.applescript":
+            return {"updated": True}
+        return {"found": True, "contact": contact_item("contact-1", name="Alice Doe", phone="+15551234567")}
+
+    monkeypatch.setattr(bridge, "_run_script", fake_run_script)
+
+    bridge.update_contact("contact-1", phones=[], emails=[])
+
+    assert calls[0][1][4:6] == ("__NOCHANGE__", "__NOCHANGE__")
+
+
+def test_resolve_recipient_rejects_several_name_matches(monkeypatch) -> None:
+    bridge = AppleContactsBridge(*UNUSED_HELPER)
+    # "Ann" exactly matches only the first contact; before the fix the exact match won
+    # over the second name match, and a letters-only query normalized to "" exact-matched
+    # any digitless phone.
+    items = [contact_item("ann", name="Ann Smith"), contact_item("joanne", name="Joanne Roe", phone="+15550001111")]
+    digitless = bridge._normalize_summary(contact_item("other", name="Other Person", phone="mobile"))
+
+    def fake_run_script(script_name: str, *args: str) -> dict[str, object]:
+        assert script_name == "search_contacts.applescript"
+        return {"items": items[: int(args[1])]}
+
+    monkeypatch.setattr(bridge, "_run_script", fake_run_script)
+
+    assert not bridge._is_exact_match(digitless, "ann", bridge._normalize_lookup_value("Ann"))
+    with pytest.raises(ContactsBridgeError) as failure:
+        bridge.resolve_message_recipient("Ann")
+    assert failure.value.error_code == "AMBIGUOUS_CONTACT"
+
+
 @pytest.mark.skipif(
     sys.platform != "darwin" or shutil.which("swiftc") is None,
     reason="swiftc is only available on macOS with the Xcode tools",

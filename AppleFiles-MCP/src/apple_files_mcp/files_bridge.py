@@ -3,6 +3,7 @@ from __future__ import annotations
 import heapq
 import os
 import plistlib
+import stat
 import subprocess
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -27,6 +28,15 @@ def _iso_timestamp(timestamp: float | None) -> str | None:
 
 class FilesBridge:
     _ICLOUD_SUFFIX = Path("Library/Mobile Documents/com~apple~CloudDocs")
+    _MAX_READ_BYTES = 1_000_000
+    # Executables, installers and documents that redirect `open` to another target.
+    _UNSAFE_OPEN_SUFFIXES = frozenset(
+        {
+            ".app", ".command", ".tool", ".terminal", ".sh", ".workflow", ".action",
+            ".scpt", ".scptd", ".applescript", ".pkg", ".mpkg", ".prefpane", ".shortcut",
+            ".webloc", ".fileloc", ".inetloc", ".url",
+        }
+    )
 
     def __init__(self, allowed_roots: tuple[Path, ...]) -> None:
         self.allowed_roots = tuple(path.expanduser().resolve(strict=False) for path in allowed_roots)
@@ -169,9 +179,11 @@ class FilesBridge:
 
     def read_text_file(self, path: str, max_bytes: int = 100_000) -> tuple[str, bool]:
         file_path = self._ensure_allowed(path)
-        if file_path.is_dir():
-            raise FilesBridgeError("NOT_A_FILE", f"Path is a directory: {file_path}", "Choose a text file path.")
-        raw = file_path.read_bytes()
+        if not stat.S_ISREG(file_path.stat().st_mode):
+            raise FilesBridgeError("NOT_A_FILE", f"Path is not a regular file: {file_path}", "Choose a text file path.")
+        max_bytes = max(1, min(max_bytes, self._MAX_READ_BYTES))
+        with file_path.open("rb") as handle:
+            raw = handle.read(max_bytes + 1)
         truncated = len(raw) > max_bytes
         payload = raw[:max_bytes]
         try:
@@ -205,8 +217,8 @@ class FilesBridge:
                 continue
             seen_paths.add(path_text)
             try:
-                entries.append(self._entry(Path(path_text)))
-            except OSError:
+                entries.append(self._entry(self._ensure_allowed(path_text)))
+            except (OSError, FilesBridgeError):
                 continue
         return entries[:limit]
 
@@ -229,12 +241,7 @@ class FilesBridge:
                     "!",
                     "-name",
                     ".*",
-                    "-exec",
-                    "stat",
-                    "-f",
-                    "%m\t%N",
-                    "{}",
-                    "+",
+                    "-print0",
                 ],
                 capture_output=True,
                 text=True,
@@ -242,32 +249,44 @@ class FilesBridge:
                 timeout=8,
             )
         except FileNotFoundError as exc:
-            raise FilesBridgeError("COMMAND_NOT_FOUND", "Missing find/stat command.", "Run this server on macOS.") from exc
+            raise FilesBridgeError("COMMAND_NOT_FOUND", "Missing find command.", "Run this server on macOS.") from exc
         except OSError as exc:
-            raise FilesBridgeError("COMMAND_FAILED", f"Could not run find/stat: {exc}", "Run this server on macOS.") from exc
+            raise FilesBridgeError("COMMAND_FAILED", f"Could not run find: {exc}", "Run this server on macOS.") from exc
         except subprocess.CalledProcessError as exc:
             stderr = exc.stderr.strip() or exc.stdout.strip()
             raise FilesBridgeError("COMMAND_FAILED", stderr or f"Recent file scan failed for {root}.", "Retry the request.") from exc
         except subprocess.TimeoutExpired as exc:
             raise FilesBridgeError("COMMAND_TIMEOUT", f"Recent file scan timed out for {root}.", "Retry the request with fewer allowed roots.") from exc
+        # NUL is the only byte a file name cannot contain, so names with newlines or tabs stay whole.
         candidates: list[tuple[float, str]] = []
-        for line in completed.stdout.splitlines():
-            if "\t" not in line:
-                continue
-            modified_text, path_text = line.split("\t", 1)
-            cleaned_path = path_text.strip().strip('"')
-            if not cleaned_path:
+        for path_text in completed.stdout.split("\0"):
+            if not path_text:
                 continue
             try:
-                modified_ts = float(modified_text)
-            except ValueError:
+                modified_ts = os.lstat(path_text).st_mtime
+            except OSError:
                 continue
-            candidates.append((modified_ts, cleaned_path))
+            candidates.append((modified_ts, path_text))
         return candidates
 
     def open_path(self, path: str) -> str:
         target = self._ensure_allowed(path)
-        self._run("open", str(target))
+        if target.suffix.lower() in self._UNSAFE_OPEN_SUFFIXES:
+            raise FilesBridgeError(
+                "UNSAFE_OPEN_TARGET",
+                f"Refusing to open an executable, installer or link document: {target}",
+                "Use files_reveal_in_finder and open it yourself if you trust it.",
+            )
+        if target.is_file():
+            with target.open("rb") as handle:
+                is_alias = handle.read(12) == b"book\0\0\0\0mark"
+            if is_alias or os.access(target, os.X_OK):
+                raise FilesBridgeError(
+                    "UNSAFE_OPEN_TARGET",
+                    f"Refusing to open an executable file or Finder alias: {target}",
+                    "Use files_reveal_in_finder and open it yourself if you trust it.",
+                )
+        self._run("open", "--", str(target))
         return str(target)
 
     def reveal_in_finder(self, path: str) -> str:
@@ -344,6 +363,14 @@ class FilesBridge:
     def move_path(self, source: str, destination: str) -> tuple[str, str]:
         source_path = self._ensure_allowed(source)
         destination_path = self._ensure_allowed(destination, allow_missing=True)
+        # A same-file destination is a case-only rename on a case-insensitive volume, not an overwrite.
+        if os.path.lexists(destination_path) and not os.path.samefile(source_path, destination_path):
+            raise FilesBridgeError(
+                "DESTINATION_EXISTS",
+                f"Destination already exists: {destination_path}",
+                "Choose a destination path that does not exist yet.",
+            )
+        # ponytail: check-then-rename race; use renamex_np(RENAME_EXCL) via ctypes if concurrent writers matter.
         source_path.rename(destination_path)
         return str(source_path), str(destination_path)
 

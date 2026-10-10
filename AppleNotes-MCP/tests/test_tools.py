@@ -152,5 +152,32 @@ def test_append_to_note_preserves_existing_content(monkeypatch) -> None:
     assert "Add flights" in result.note.body_html
 
 
+def test_unscoped_list_notes_honors_folder_allowlist(monkeypatch) -> None:
+    # folder_id=None used to skip the folder allowlist and return every note.
+    monkeypatch.setenv("APPLE_NOTES_MCP_SAFETY_MODE", "full_access")
+    monkeypatch.setenv("APPLE_NOTES_MCP_ALLOWED_FOLDERS", "Work")
+    load_settings.cache_clear()
+    monkeypatch.setattr(tools, "_bridge", lambda: FakeBridge())
+
+    result = tools.notes_list_notes()
+
+    assert result.ok is True
+    assert result.count == 0
+
+
+def test_delete_folder_fails_closed(monkeypatch) -> None:
+    # Deleting a folder cascades to its notes: blocked outside full_access, and
+    # an unresolved folder id must not skip the gate.
+    monkeypatch.setattr(tools, "_bridge", lambda: FakeBridge())
+    monkeypatch.setenv("APPLE_NOTES_MCP_SAFETY_MODE", "safe_manage")
+    load_settings.cache_clear()
+    assert tools.notes_delete_folder(folder_id="folder-1").error.error_code == "WRITE_BLOCKED"
+
+    monkeypatch.setenv("APPLE_NOTES_MCP_SAFETY_MODE", "full_access")
+    load_settings.cache_clear()
+    assert tools.notes_delete_folder(folder_id="folder-missing").error.error_code == "FOLDER_NOT_FOUND"
+    assert tools.notes_delete_folder(folder_id="folder-1").deleted is True
+
+
 def teardown_function() -> None:
     load_settings.cache_clear()

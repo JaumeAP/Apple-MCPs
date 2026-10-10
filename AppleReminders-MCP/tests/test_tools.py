@@ -1,3 +1,5 @@
+import json
+
 from apple_reminders_mcp import tools
 from apple_reminders_mcp.config import load_settings
 from apple_reminders_mcp.models import ReminderDetail, ReminderListInfo
@@ -108,7 +110,7 @@ def test_create_and_delete_list_return_structured_payload(monkeypatch) -> None:
     monkeypatch.setattr(tools, "_bridge", lambda: FakeBridge())
 
     created = tools.reminders_create_list("General")
-    deleted = tools.reminders_delete_list("list-new")
+    deleted = tools.reminders_delete_list("list-1")
 
     assert created.ok is True
     assert created.title == "General"
@@ -129,6 +131,74 @@ def test_create_reminder_rejects_subtasks_until_supported(monkeypatch) -> None:
 
     assert result.ok is False
     assert result.error.error_code == "SUBTASKS_UNSUPPORTED"
+
+
+class TwoListBridge(FakeBridge):
+    def __init__(self) -> None:
+        self.deleted_list_ids: list[str] = []
+        self.updated: list[dict] = []
+
+    def list_lists(self):
+        return [
+            *super().list_lists(),
+            ReminderListInfo(list_id="list-2", title="Private", source_title="iCloud", allows_content_modifications=True),
+        ]
+
+    def list_reminders(self, **kwargs):
+        chores = self.get_reminder("x-apple-reminder://chores")
+        private = chores.model_copy(update={"reminder_id": "x-apple-reminder://private", "list_id": "list-2", "list_name": "Private"})
+        return [chores, private]
+
+    def delete_list(self, list_id: str):
+        self.deleted_list_ids.append(list_id)
+        return super().delete_list(list_id)
+
+    def update_reminder(self, reminder_id: str, **kwargs) -> ReminderDetail:
+        self.updated.append(kwargs)
+        return super().update_reminder(reminder_id, **kwargs)
+
+
+def test_delete_list_applies_allowlist_and_skips_unknown_ids(monkeypatch) -> None:
+    monkeypatch.setenv("APPLE_REMINDERS_MCP_SAFETY_MODE", "full_access")
+    monkeypatch.setenv("APPLE_REMINDERS_MCP_ALLOWED_LISTS", "Chores")
+    load_settings.cache_clear()
+    bridge = TwoListBridge()
+    monkeypatch.setattr(tools, "_bridge", lambda: bridge)
+
+    blocked = tools.reminders_delete_list("list-2")
+    calendar_id = tools.reminders_delete_list("event-calendar-id")
+
+    assert blocked.ok is False
+    assert blocked.error.error_code == "LIST_BLOCKED"
+    assert calendar_id.ok is True
+    assert calendar_id.deleted is False
+    assert bridge.deleted_list_ids == []
+
+
+def test_update_reminder_checks_destination_list_against_allowlist(monkeypatch) -> None:
+    monkeypatch.setenv("APPLE_REMINDERS_MCP_SAFETY_MODE", "safe_manage")
+    monkeypatch.setenv("APPLE_REMINDERS_MCP_ALLOWED_LISTS", "Chores")
+    load_settings.cache_clear()
+    bridge = TwoListBridge()
+    monkeypatch.setattr(tools, "_bridge", lambda: bridge)
+
+    result = tools.reminders_update_reminder("x-apple-reminder://chores", list_id="list-2")
+
+    assert result.ok is False
+    assert result.error.error_code == "LIST_BLOCKED"
+    assert bridge.updated == []
+
+
+def test_resources_hide_lists_outside_allowlist(monkeypatch) -> None:
+    monkeypatch.setenv("APPLE_REMINDERS_MCP_ALLOWED_LISTS", "Chores")
+    load_settings.cache_clear()
+    monkeypatch.setattr(tools, "_bridge", lambda: TwoListBridge())
+
+    lists = json.loads(tools.reminders_lists_resource())
+    today = json.loads(tools.reminders_today_resource())
+
+    assert [item["title"] for item in lists["lists"]] == ["Chores"]
+    assert [item["list_name"] for item in today["reminders"]] == ["Chores"]
 
 
 def teardown_function() -> None:
