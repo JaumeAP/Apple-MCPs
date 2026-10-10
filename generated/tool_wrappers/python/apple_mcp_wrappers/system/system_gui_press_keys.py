@@ -14,7 +14,7 @@ async def system_gui_press_keys(
 ) -> Any:
     """Press Keys
 
-    Press a key or key chord in the target application. This is a GUI fallback tool.
+    Press a key or key chord in a named application. This is a GUI fallback tool. Requires full_access and refuses terminal apps.
 
     Example:
         await system_gui_press_keys(client, key='example_key', modifiers=[])
