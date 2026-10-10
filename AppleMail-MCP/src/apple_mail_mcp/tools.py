@@ -329,19 +329,21 @@ def mail_get_thread_tool(
     ensure_tool_allowed(settings.safety_profile, "mail_get_thread")
     anchor = bridge.get_message(message_id)
     normalized_subject = normalized_thread_subject(anchor.subject)
-    search_query = normalized_subject or anchor.sender or "*"
-    search_limit = max(25, min(limit * 4, 100))
-    candidates = bridge.search_messages(
-        query=search_query or "*",
-        mailbox=anchor.mailbox,
-        unread_only=False,
-        limit=search_limit,
-    )
+    # Without a subject there is nothing to group on: the thread is the anchor
+    # alone, never every message from the same sender.
+    candidates = []
+    if normalized_subject:
+        candidates = bridge.search_messages(
+            query=normalized_subject,
+            mailbox=anchor.mailbox,
+            unread_only=False,
+            limit=max(25, min(limit * 4, 100)),
+        )
     matched: list[object] = []
     seen: set[str] = set()
     for candidate in [*candidates, anchor]:
         candidate_subject = normalized_thread_subject(candidate.subject)
-        if normalized_subject and candidate_subject.lower() != normalized_subject.lower():
+        if candidate_subject.lower() != normalized_subject.lower():
             continue
         if candidate.message_id in seen:
             continue
@@ -886,7 +888,7 @@ def create_server(settings: Settings | None = None, bridge: AppleMailBridge | No
         name="mail_reply_message",
         title="Reply to Message",
         description="Reply to an existing email message. Provide a message_id and body text. Set reply_all=true to reply to all recipients. Optionally specify from_account.",
-        annotations=ToolAnnotations(destructive_hint=False, idempotent_hint=False, open_world_hint=True),
+        annotations=ToolAnnotations(destructive_hint=True, idempotent_hint=False, open_world_hint=True),
         structured_output=True,
     )
     def mail_reply_message_registered(
@@ -908,7 +910,7 @@ def create_server(settings: Settings | None = None, bridge: AppleMailBridge | No
         name="mail_forward_message",
         title="Forward Message",
         description="Forward an existing email message to new recipients. Provide a message_id and the to list. Optionally prepend body text and specify from_account.",
-        annotations=ToolAnnotations(destructive_hint=False, idempotent_hint=False, open_world_hint=True),
+        annotations=ToolAnnotations(destructive_hint=True, idempotent_hint=False, open_world_hint=True),
         structured_output=True,
     )
     def mail_forward_message_registered(
@@ -984,7 +986,7 @@ def create_server(settings: Settings | None = None, bridge: AppleMailBridge | No
         name="mail_reply_latest_in_thread",
         title="Reply To Latest In Thread",
         description="Find the latest related message in the same mailbox thread and reply to that message.",
-        annotations=ToolAnnotations(destructive_hint=False, idempotent_hint=False, open_world_hint=True),
+        annotations=ToolAnnotations(destructive_hint=True, idempotent_hint=False, open_world_hint=True),
         structured_output=True,
     )
     def mail_reply_latest_in_thread_registered(
@@ -1008,7 +1010,7 @@ def create_server(settings: Settings | None = None, bridge: AppleMailBridge | No
         name="mail_archive_thread",
         title="Archive Thread",
         description="Move related messages in the same mailbox thread to the target archive mailbox.",
-        annotations=ToolAnnotations(destructive_hint=False, idempotent_hint=False, open_world_hint=False),
+        annotations=ToolAnnotations(destructive_hint=True, idempotent_hint=False, open_world_hint=False),
         structured_output=True,
     )
     def mail_archive_thread_registered(
