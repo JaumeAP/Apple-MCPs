@@ -6,6 +6,14 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 ## [Unreleased]
 
+## [1.0.5-jap.14] - 2026-10-10 (JaumeAP fork)
+
+### Changed
+
+- Files: the plugin runs apple-files in `full_access` mode, so it can delete,
+  and limits it to the invoices folder `/Users/jap/Documents/_Facturas`
+  instead of the default Desktop, Documents, Downloads and iCloud Drive roots.
+
 ## [1.0.5-jap.13] - 2026-10-10 (JaumeAP fork)
 
 ### Changed
