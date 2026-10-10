@@ -6,6 +6,20 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 ## [Unreleased]
 
+## [1.0.5-jap.7] - 2026-10-10 (JaumeAP fork)
+
+### Security
+
+- Notes: create-timeout recovery never adopts a same-title note whose
+  creation time is unknown or earlier than the create call.
+- Contacts: backup files are created 0600 in a new 0700 directory.
+
+### Fixed
+
+- Calendar and Reminders helper: an attendee without a URL no longer
+  crashes the helper. Update and delete descriptions say that native access
+  changes only this occurrence of a recurring event.
+
 ## [1.0.5-jap.6] - 2026-10-10 (JaumeAP fork)
 
 ### Security

@@ -19,7 +19,7 @@ async def calendar_update_event(
 ) -> Any:
     """Update Event
 
-    Update one or more fields on an existing calendar event.
+    Update one or more fields on an existing calendar event. With native Calendar access, a recurring event is changed for this occurrence only, not the rest of the series; the automation fallback may act on the whole series.
 
     Example:
         await calendar_update_event(client, event_id='example_event_id', title='example_title')

@@ -113,7 +113,9 @@ Xcode command line tools must be installed.
   Notes are not returned, and creating or updating a contact with a non-empty `note` fails with an
   explicit error.
 - Optional backups: set `APPLE_CONTACTS_MCP_BACKUP_DIR` to save each contact as a `.vcf` file in that
-  directory before `contacts_update_contact` or `contacts_delete_contact` changes it.
+  directory before `contacts_update_contact` or `contacts_delete_contact` changes it. Backup files are
+  owner-only (0600) and a new backup directory is created 0700. If macOS refuses the vCard export,
+  a partial `.json` backup is kept instead.
 
 ## macOS Permissions
 

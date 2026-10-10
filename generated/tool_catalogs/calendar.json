@@ -334,7 +334,7 @@
         "location: string (optional)",
         "all_day: boolean (optional)"
       ],
-      "description": "Update one or more fields on an existing calendar event.",
+      "description": "Update one or more fields on an existing calendar event. With native Calendar access, a recurring event is changed for this occurrence only, not the rest of the series; the automation fallback may act on the whole series.",
       "domain": "calendar",
       "example_calls": [
         {
@@ -361,10 +361,18 @@
         "more",
         "fields",
         "field",
-        "existing"
+        "existing",
+        "native",
+        "access",
+        "acces",
+        "recurring",
+        "changed",
+        "this",
+        "thi",
+        "occurrence"
       ],
       "title": "Update Event",
-      "usage_intent": "Update one or more fields on an existing calendar event."
+      "usage_intent": "Update one or more fields on an existing calendar event. With native Calendar access, a recurring event is changed for this occurrence only, not the rest of the series; the automation fallback may act on the whole series."
     },
     {
       "aliases": [
@@ -380,7 +388,7 @@
       "argument_summary": [
         "event_id: string (required)"
       ],
-      "description": "Delete a calendar event by event_id.",
+      "description": "Delete a calendar event by event_id. With native Calendar access, a recurring event is deleted for this occurrence only, not the rest of the series; the automation fallback may delete the whole series.",
       "domain": "calendar",
       "example_calls": [
         {
@@ -401,10 +409,23 @@
         "meeting",
         "meetings",
         "schedule",
-        "delete"
+        "delete",
+        "native",
+        "access",
+        "acces",
+        "recurring",
+        "deleted",
+        "this",
+        "thi",
+        "occurrence",
+        "only",
+        "not",
+        "rest",
+        "series",
+        "sery"
       ],
       "title": "Delete Event",
-      "usage_intent": "Delete a calendar event by event_id."
+      "usage_intent": "Delete a calendar event by event_id. With native Calendar access, a recurring event is deleted for this occurrence only, not the rest of the series; the automation fallback may delete the whole series."
     },
     {
       "aliases": [
