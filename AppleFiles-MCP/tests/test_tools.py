@@ -66,7 +66,10 @@ class StubBridge:
     def copy_path(self, source: str, destination: str):
         return source, destination
 
-    def delete_path(self, path: str):
+    def create_file(self, path: str, text: str | None = None, content_base64: str | None = None):
+        return path
+
+    def delete_path(self, path: str, recursive: bool = False):
         return path
 
 
@@ -92,6 +95,7 @@ def test_files_health_respects_safety_mode(monkeypatch):
     manage = tools.files_health()
 
     assert "create_folder" in manage.capabilities
+    assert "create_file" in manage.capabilities
     assert "move_path" in manage.capabilities
     assert "copy_path" in manage.capabilities
     assert "open_path" in manage.capabilities
@@ -186,6 +190,47 @@ def test_files_copy_path_respects_safety_mode(monkeypatch):
     assert copied.ok is True
     assert copied.action == "copied"
     assert copied.destination == "/Users/test/Downloads/b.txt"
+
+
+def test_files_create_file_and_recursive_delete_respect_safety_mode(monkeypatch):
+    seen = {}
+
+    class RecordingBridge(StubBridge):
+        def create_file(self, path: str, text: str | None = None, content_base64: str | None = None):
+            seen["create"] = (path, text, content_base64)
+            return path
+
+        def delete_path(self, path: str, recursive: bool = False):
+            seen["delete"] = (path, recursive)
+            return path
+
+    monkeypatch.setattr(tools, "_bridge", lambda: RecordingBridge())
+    monkeypatch.setattr(tools, "notify_resources_changed", lambda ctx: asyncio.sleep(0))
+    monkeypatch.setenv("APPLE_FILES_MCP_SAFETY_MODE", "safe_readonly")
+    tools.load_settings.cache_clear()
+
+    denied = asyncio.run(tools.files_create_file("/Users/test/Downloads/a.txt", None, text="hi"))
+
+    monkeypatch.setenv("APPLE_FILES_MCP_SAFETY_MODE", "safe_manage")
+    tools.load_settings.cache_clear()
+
+    created = asyncio.run(tools.files_create_file("/Users/test/Downloads/a.txt", None, text="hi"))
+    delete_denied = asyncio.run(tools.files_delete_path("/Users/test/Downloads/old", None, recursive=True))
+
+    monkeypatch.setenv("APPLE_FILES_MCP_SAFETY_MODE", "full_access")
+    tools.load_settings.cache_clear()
+
+    deleted = asyncio.run(tools.files_delete_path("/Users/test/Downloads/old", None, recursive=True))
+
+    assert denied.ok is False
+    assert denied.error.error_code == "SAFETY_RESTRICTION"
+    assert created.ok is True
+    assert created.action == "created"
+    assert seen["create"] == ("/Users/test/Downloads/a.txt", "hi", None)
+    assert delete_denied.ok is False
+    assert deleted.ok is True
+    assert deleted.action == "deleted"
+    assert seen["delete"] == ("/Users/test/Downloads/old", True)
 
 
 def test_main_uses_streamable_http(monkeypatch):
