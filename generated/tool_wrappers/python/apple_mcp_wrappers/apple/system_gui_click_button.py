@@ -15,7 +15,7 @@ async def system_gui_click_button(
 ) -> Any:
     """System Gui Click Button
 
-    Delegated Apple domain tool 'system_gui_click_button' exposed through Apple-Tools-MCP.
+    Click a named button in the front window of a named application. This is a GUI fallback tool. Requires full_access and a target whose bundle id is listed in APPLE_SYSTEM_MCP_GUI_ALLOWED_APPS; terminals and apps that run typed code (Script Editor, Automator, Shortcuts, IDEs) are always refused.
 
     Example:
         await system_gui_click_button(client, label='example_label', description='example_description')

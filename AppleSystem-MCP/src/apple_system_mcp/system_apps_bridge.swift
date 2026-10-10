@@ -8,6 +8,7 @@
 //   frontmost            the frontmost application
 //   bundle-id ID         the first running application with that bundle identifier
 //   name NAME            the first running application with that name
+//   installed-name NAME  the bundle identifier of the installed application with that name
 //   running              every running regular (Dock) application
 //
 // Prints a JSON object {"name", "bundle_id", "process_id"} (a JSON array of them for
@@ -62,6 +63,13 @@ case "name":
         fail("Can't get application process \"\(argument)\".")
     }
     emit(record(app))
+case "installed-name":
+    // Launch Services lookup of an installed (not necessarily running) application by name.
+    guard let path = NSWorkspace.shared.fullPath(forApplication: argument),
+          let bundleID = Bundle(path: path)?.bundleIdentifier else {
+        fail("Can't find an installed application named \"\(argument)\".")
+    }
+    emit(["name": argument, "bundle_id": bundleID])
 case "running":
     emit(visible.map(record))
 default:

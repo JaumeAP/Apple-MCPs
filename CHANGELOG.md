@@ -6,6 +6,46 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 ## [Unreleased]
 
+## [1.0.5-jap.12] - 2026-10-10 (JaumeAP fork)
+
+Fixes from a `/code-review max` of the security-audit changes.
+
+### Security
+
+- System: GUI input tools need the target's bundle id in
+  `APPLE_SYSTEM_MCP_GUI_ALLOWED_APPS` (empty by default), always refuse
+  terminals and script-capable apps (Script Editor, Automator, Shortcuts,
+  code editors), and stop with `GUI_TARGET_NOT_FRONTMOST` unless the target
+  is frontmost; input is sent to the target process. `open_application`
+  refuses paths and launches by bundle id. Apple-Tools marks the GUI tools
+  destructive.
+- Notes: renaming or retagging a note with attachments is refused; the
+  folder allowlist now covers the `notes://note/` resource, the source folder
+  of moves and updates, and nested folders on delete.
+- Reminders: list deletion refuses calendars that also hold events; the
+  allowlist filters `list_lists` and unscoped `list_reminders`; ids are
+  stripped before checks.
+- Files: `open` refuses `.jar` and network location documents; OS errors are
+  structured. Shortcuts: the `~/Library` rule ignores case, a configured root
+  under `~/Library` lifts it, and option values cannot become options.
+- Calendar, Reminders, Contacts, Mail: an unrecognized safety mode falls back
+  to `safe_readonly`.
+
+### Fixed
+
+- Notes: epochs are formatted without the locale decimal separator (list and
+  get returned invalid JSON on comma-decimal locales); `""` folder ids and
+  titles mean no change; search filters before its cap.
+- Calendar: recurring events get occurrence ids (`<id>@<start>`), and update
+  and delete target that occurrence.
+- Contacts: a complete email or phone resolves to its exact owner and returns
+  the queried value; updates report `unchanged_fields`.
+- Calendar, Reminders, Maps: helper compiles use unique temp names; a timeout
+  on a change no longer advises a blind retry; empty notes or location mean
+  no change; a compile timeout falls back to JXA.
+- System: `read_preference_domain` accepts single-segment domains such as
+  `loginwindow`.
+
 ## [1.0.5-jap.11] - 2026-10-10 (JaumeAP fork)
 
 ### Security

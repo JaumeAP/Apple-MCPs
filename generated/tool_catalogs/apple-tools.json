@@ -6236,7 +6236,7 @@
         "application: string (optional)",
         "bundle_id: string (optional)"
       ],
-      "description": "Delegated Apple domain tool 'system_gui_click_menu_path' exposed through Apple-Tools-MCP.",
+      "description": "Click a menu path in a named application, for example ['File', 'New Window']. This is a GUI fallback tool. Requires full_access and a target whose bundle id is listed in APPLE_SYSTEM_MCP_GUI_ALLOWED_APPS; terminals and apps that run typed code (Script Editor, Automator, Shortcuts, IDEs) are always refused.",
       "domain": "apple",
       "example_calls": [
         {
@@ -6249,7 +6249,7 @@
       ],
       "name": "system_gui_click_menu_path",
       "read_only": false,
-      "risk_level": "medium",
+      "risk_level": "high",
       "schema_ref": "system_gui_click_menu_path",
       "tags": [
         "assistant",
@@ -6260,15 +6260,21 @@
         "click",
         "menu",
         "path",
-        "delegated",
-        "domain",
+        "named",
+        "application",
+        "example",
+        "file",
+        "new",
+        "window",
+        "this",
+        "thi",
+        "fallback",
         "tool",
-        "exposed",
-        "tools",
-        "mcp"
+        "requires",
+        "requir"
       ],
       "title": "System Gui Click Menu Path",
-      "usage_intent": "Delegated Apple domain tool 'system_gui_click_menu_path' exposed through Apple-Tools-MCP."
+      "usage_intent": "Click a menu path in a named application, for example ['File', 'New Window']. This is a GUI fallback tool. Requires full_access and a target whose bundle id is listed in APPLE_SYSTEM_MCP_GUI_ALLOWED_APPS; terminals and apps that run typed code (Script Editor, Automator, Shortcuts, IDEs) are always refused."
     },
     {
       "aliases": [
@@ -6284,7 +6290,7 @@
         "application: string (optional)",
         "bundle_id: string (optional)"
       ],
-      "description": "Delegated Apple domain tool 'system_gui_press_keys' exposed through Apple-Tools-MCP.",
+      "description": "Press a key or key chord in a named application. This is a GUI fallback tool. Requires full_access and a target whose bundle id is listed in APPLE_SYSTEM_MCP_GUI_ALLOWED_APPS; terminals and apps that run typed code (Script Editor, Automator, Shortcuts, IDEs) are always refused.",
       "domain": "apple",
       "example_calls": [
         {
@@ -6297,7 +6303,7 @@
       ],
       "name": "system_gui_press_keys",
       "read_only": false,
-      "risk_level": "medium",
+      "risk_level": "high",
       "schema_ref": "system_gui_press_keys",
       "tags": [
         "assistant",
@@ -6309,15 +6315,20 @@
         "pres",
         "keys",
         "key",
-        "delegated",
-        "domain",
+        "chord",
+        "named",
+        "application",
+        "this",
+        "thi",
+        "fallback",
         "tool",
-        "exposed",
-        "tools",
-        "mcp"
+        "requires",
+        "requir",
+        "full",
+        "access"
       ],
       "title": "System Gui Press Keys",
-      "usage_intent": "Delegated Apple domain tool 'system_gui_press_keys' exposed through Apple-Tools-MCP."
+      "usage_intent": "Press a key or key chord in a named application. This is a GUI fallback tool. Requires full_access and a target whose bundle id is listed in APPLE_SYSTEM_MCP_GUI_ALLOWED_APPS; terminals and apps that run typed code (Script Editor, Automator, Shortcuts, IDEs) are always refused."
     },
     {
       "aliases": [
@@ -6332,7 +6343,7 @@
         "application: string (optional)",
         "bundle_id: string (optional)"
       ],
-      "description": "Delegated Apple domain tool 'system_gui_type_text' exposed through Apple-Tools-MCP.",
+      "description": "Type text into the focused control of a named application. This is a GUI fallback tool. Requires full_access and a target whose bundle id is listed in APPLE_SYSTEM_MCP_GUI_ALLOWED_APPS; terminals and apps that run typed code (Script Editor, Automator, Shortcuts, IDEs) are always refused.",
       "domain": "apple",
       "example_calls": [
         {
@@ -6345,7 +6356,7 @@
       ],
       "name": "system_gui_type_text",
       "read_only": false,
-      "risk_level": "medium",
+      "risk_level": "high",
       "schema_ref": "system_gui_type_text",
       "tags": [
         "assistant",
@@ -6355,15 +6366,22 @@
         "gui",
         "type",
         "text",
-        "delegated",
-        "domain",
+        "focused",
+        "control",
+        "named",
+        "application",
+        "this",
+        "thi",
+        "fallback",
         "tool",
-        "exposed",
-        "tools",
-        "mcp"
+        "requires",
+        "requir",
+        "full",
+        "access",
+        "acces"
       ],
       "title": "System Gui Type Text",
-      "usage_intent": "Delegated Apple domain tool 'system_gui_type_text' exposed through Apple-Tools-MCP."
+      "usage_intent": "Type text into the focused control of a named application. This is a GUI fallback tool. Requires full_access and a target whose bundle id is listed in APPLE_SYSTEM_MCP_GUI_ALLOWED_APPS; terminals and apps that run typed code (Script Editor, Automator, Shortcuts, IDEs) are always refused."
     },
     {
       "aliases": [
@@ -6380,7 +6398,7 @@
         "application: string (optional)",
         "bundle_id: string (optional)"
       ],
-      "description": "Delegated Apple domain tool 'system_gui_click_button' exposed through Apple-Tools-MCP.",
+      "description": "Click a named button in the front window of a named application. This is a GUI fallback tool. Requires full_access and a target whose bundle id is listed in APPLE_SYSTEM_MCP_GUI_ALLOWED_APPS; terminals and apps that run typed code (Script Editor, Automator, Shortcuts, IDEs) are always refused.",
       "domain": "apple",
       "example_calls": [
         {
@@ -6393,7 +6411,7 @@
       ],
       "name": "system_gui_click_button",
       "read_only": false,
-      "risk_level": "medium",
+      "risk_level": "high",
       "schema_ref": "system_gui_click_button",
       "tags": [
         "assistant",
@@ -6403,15 +6421,22 @@
         "gui",
         "click",
         "button",
-        "delegated",
-        "domain",
+        "named",
+        "front",
+        "window",
+        "application",
+        "this",
+        "thi",
+        "fallback",
         "tool",
-        "exposed",
-        "tools",
-        "mcp"
+        "requires",
+        "requir",
+        "full",
+        "access",
+        "acces"
       ],
       "title": "System Gui Click Button",
-      "usage_intent": "Delegated Apple domain tool 'system_gui_click_button' exposed through Apple-Tools-MCP."
+      "usage_intent": "Click a named button in the front window of a named application. This is a GUI fallback tool. Requires full_access and a target whose bundle id is listed in APPLE_SYSTEM_MCP_GUI_ALLOWED_APPS; terminals and apps that run typed code (Script Editor, Automator, Shortcuts, IDEs) are always refused."
     },
     {
       "aliases": [
@@ -6428,7 +6453,7 @@
         "application: string (optional)",
         "bundle_id: string (optional)"
       ],
-      "description": "Delegated Apple domain tool 'system_gui_choose_popup_value' exposed through Apple-Tools-MCP.",
+      "description": "Choose a value from a named pop-up button in the front window of a named application. This is a GUI fallback tool. Requires full_access and a target whose bundle id is listed in APPLE_SYSTEM_MCP_GUI_ALLOWED_APPS; terminals and apps that run typed code (Script Editor, Automator, Shortcuts, IDEs) are always refused.",
       "domain": "apple",
       "example_calls": [
         {
@@ -6441,7 +6466,7 @@
       ],
       "name": "system_gui_choose_popup_value",
       "read_only": false,
-      "risk_level": "medium",
+      "risk_level": "high",
       "schema_ref": "system_gui_choose_popup_value",
       "tags": [
         "assistant",
@@ -6452,15 +6477,21 @@
         "choose",
         "popup",
         "value",
-        "delegated",
-        "domain",
+        "named",
+        "pop",
+        "button",
+        "front",
+        "window",
+        "application",
+        "this",
+        "thi",
+        "fallback",
         "tool",
-        "exposed",
-        "tools",
-        "mcp"
+        "requires",
+        "requir"
       ],
       "title": "System Gui Choose Popup Value",
-      "usage_intent": "Delegated Apple domain tool 'system_gui_choose_popup_value' exposed through Apple-Tools-MCP."
+      "usage_intent": "Choose a value from a named pop-up button in the front window of a named application. This is a GUI fallback tool. Requires full_access and a target whose bundle id is listed in APPLE_SYSTEM_MCP_GUI_ALLOWED_APPS; terminals and apps that run typed code (Script Editor, Automator, Shortcuts, IDEs) are always refused."
     },
     {
       "aliases": [

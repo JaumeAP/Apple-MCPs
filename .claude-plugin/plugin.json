@@ -1,6 +1,6 @@
 {
   "name": "apple-mcps",
-  "version": "1.0.5-jap.11",
+  "version": "1.0.5-jap.12",
   "description": "Apple apps on macOS: Contacts (native helper instead of AppleScript), Reminders, Calendar, Maps, Shortcuts, System, Notes and Messages.",
   "author": {
     "name": "Jonathan Reed (upstream); native Contacts helper by JaumeAP"

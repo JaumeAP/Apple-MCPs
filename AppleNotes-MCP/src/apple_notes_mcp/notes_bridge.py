@@ -21,8 +21,6 @@ class NotesBridgeError(Exception):
 
 
 class AppleNotesBridge:
-    # After a create-script timeout, a same-title note only counts as the one
-    # we just made when its creation date is at most this old (or unknown).
     # Whole-second AppleScript epochs and clock rounding: tolerate this much
     # before the create call started when deciding a note is the new one.
     _CREATE_RECOVERY_SLACK_SECONDS = 2
@@ -113,7 +111,7 @@ class AppleNotesBridge:
             for _ in range(3):
                 try:
                     time.sleep(0.5)
-                    updated = self.update_note(detail.note_id, title=title, body_html=prepared_body_html, tags=tags)
+                    updated = self.update_note(detail.note_id, title=title, body_html=prepared_body_html, tags=tags, check_attachments=False)
                     if updated.body_html:
                         self._body_html_cache[updated.note_id] = updated.body_html
                     return updated
@@ -137,16 +135,31 @@ class AppleNotesBridge:
         body_html: str | None = None,
         folder_id: str | None = None,
         tags: list[str] | None = None,
+        check_attachments: bool = True,
     ) -> NoteDetail:
-        # Models send "" for unused optional strings: "" means "keep the body",
-        # exactly like None, never "erase it".
+        # Models send "" for unused optional strings: "" means "keep the body"
+        # (or the title), exactly like None, never "erase it".
         if body_html == "":
             body_html = None
+        if title == "":
+            title = None
+        current: NoteDetail | None = None
+        # A title, body or tags change rewrites the whole body with `set body`,
+        # which drops attachments. Callers that already checked (append) or
+        # know the note is new (create) skip the extra read.
+        if check_attachments and (title is not None or body_html is not None or tags):
+            current = self.get_note(note_id)
+            if current.attachments:
+                raise NotesBridgeError(
+                    "NOTE_HAS_ATTACHMENTS",
+                    f"Note '{note_id}' has {len(current.attachments)} attachment(s); changing its title, body or tags rewrites the whole body and would lose them.",
+                    "Edit this note in Notes.app directly; moving it to another folder is still supported.",
+                )
         prepared_body_html = body_html
         if title is not None:
             body_source = body_html
             if body_source is None:
-                current = self.get_note(note_id)
+                current = current or self.get_note(note_id)
                 body_source = current.body_html or self._html_from_plaintext(current.plaintext)
             prepared_body_html = self._prepare_body_html(title, body_source)
         payload = self._run_script(
@@ -180,7 +193,7 @@ class AppleNotesBridge:
             )
         existing_html = current.body_html or self._html_from_plaintext(current.plaintext)
         combined_html = existing_html + body_html
-        return self.update_note(note_id, title=current.title, body_html=combined_html)
+        return self.update_note(note_id, title=current.title, body_html=combined_html, check_attachments=False)
 
     def delete_note(self, note_id: str) -> bool:
         payload = self._run_script("delete_note.applescript", note_id)
@@ -218,7 +231,7 @@ class AppleNotesBridge:
         query: str,
         account_name: str | None = None,
         folder_id: str | None = None,
-        limit: int = 25,
+        limit: int | None = 25,
     ) -> list[NoteSummary]:
         query_text = query.strip().lower()
         notes = self.list_notes(account_name=account_name, folder_id=folder_id)
@@ -236,7 +249,8 @@ class AppleNotesBridge:
             if not query_text or query_text in haystack:
                 matched.append(note)
         matched.sort(key=lambda item: item.modified_epoch or 0, reverse=True)
-        return matched[: max(1, min(limit, 100))]
+        # None returns every match, so callers can filter before capping.
+        return matched if limit is None else matched[: max(1, min(limit, 100))]
 
     def _recover_created_note(self, title: str, folder_id: str, create_started: float) -> NoteDetail | None:
         # Only claim recovery when exactly one note in the target folder has

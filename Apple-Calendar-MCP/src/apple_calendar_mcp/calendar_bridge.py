@@ -23,6 +23,8 @@ class CalendarBridge:
     _JXA_TIMEOUT_SECONDS = 30
     _HELPER_TIMEOUT_SECONDS = 60
     _COMPILE_TIMEOUT_SECONDS = 300
+    # A timeout leaves the outcome of these commands unknown.
+    _MUTATING_COMMANDS = frozenset({"create-calendar-event", "update-calendar-event", "delete-calendar-event"})
 
     def __init__(self, helper_source: Path, helper_binary: Path) -> None:
         self.helper_source = helper_source
@@ -325,6 +327,12 @@ class CalendarBridge:
         all_day: bool | None = None,
         recurrence: dict[str, object] | None = None,
     ) -> EventDetail:
+        # The helper reads an empty string as "clear", so '' would silently erase
+        # these fields. Treat it as "no change", like every other omitted field.
+        if notes is not None and not notes.strip():
+            notes = None
+        if location is not None and not location.strip():
+            location = None
         request: dict[str, object] = {}
         if title is not None:
             request["title"] = title
@@ -388,6 +396,12 @@ class CalendarBridge:
                 timeout=self._HELPER_TIMEOUT_SECONDS,
             )
         except subprocess.TimeoutExpired as exc:
+            if command in self._MUTATING_COMMANDS:
+                raise CalendarBridgeError(
+                    "HELPER_TIMEOUT",
+                    "Native Calendar helper timed out. The change may or may not have been applied.",
+                    "List or get the event to check its current state before retrying.",
+                ) from exc
             raise CalendarBridgeError(
                 "HELPER_TIMEOUT",
                 "Native Calendar helper timed out.",
@@ -527,6 +541,8 @@ class CalendarBridge:
             "PERMISSION_UNKNOWN",
             "HELPER_SOURCE_MISSING",
             "HELPER_COMPILE_FAILED",
+            # The helper never ran, so falling back cannot repeat a change.
+            "HELPER_COMPILE_TIMEOUT",
             "HELPER_EXECUTION_FAILED",
         }
 

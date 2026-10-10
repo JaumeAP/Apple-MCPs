@@ -137,7 +137,7 @@ Xcode command line tools must be installed.
 - Run Contacts before any iMessage or Mail action when the user gives a person name.
 - Resolve by name, phone number, or email before acting.
 - If multiple contacts match, confirm the intended person before sending.
-- When updating a person, pass explicit `phones` or `emails` arrays only when you intend to replace that method set.
+- When updating a person, a non-empty `phones` or `emails` array replaces that method set; an empty or omitted array means no change, so update cannot clear every phone or email. The result lists the fields left unchanged in `unchanged_fields`.
 - Keep a labeled phone or email on the contact before routing Messages or Mail through it.
 
 ## Related

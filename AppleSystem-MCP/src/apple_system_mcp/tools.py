@@ -619,7 +619,7 @@ def system_gui_list_menu_bar_items(application: str | None = None, bundle_id: st
 
 @mcp.tool(
     title="Click Menu Path",
-    description="Click a menu path in a named application, for example ['File', 'New Window']. This is a GUI fallback tool. Requires full_access and refuses terminal apps.",
+    description="Click a menu path in a named application, for example ['File', 'New Window']. This is a GUI fallback tool. Requires full_access and a target whose bundle id is listed in APPLE_SYSTEM_MCP_GUI_ALLOWED_APPS; terminals and apps that run typed code (Script Editor, Automator, Shortcuts, IDEs) are always refused.",
     annotations=ToolAnnotations(destructive_hint=True, idempotent_hint=False, open_world_hint=True),
     structured_output=True,
 )
@@ -642,7 +642,7 @@ def system_gui_click_menu_path(menu_path: list[str], application: str | None = N
 
 @mcp.tool(
     title="Press Keys",
-    description="Press a key or key chord in a named application. This is a GUI fallback tool. Requires full_access and refuses terminal apps.",
+    description="Press a key or key chord in a named application. This is a GUI fallback tool. Requires full_access and a target whose bundle id is listed in APPLE_SYSTEM_MCP_GUI_ALLOWED_APPS; terminals and apps that run typed code (Script Editor, Automator, Shortcuts, IDEs) are always refused.",
     annotations=ToolAnnotations(destructive_hint=True, idempotent_hint=False, open_world_hint=True),
     structured_output=True,
 )
@@ -668,7 +668,7 @@ def system_gui_press_keys(key: str, modifiers: list[str] | None = None, applicat
 
 @mcp.tool(
     title="Type Text",
-    description="Type text into the focused control of a named application. This is a GUI fallback tool. Requires full_access and refuses terminal apps.",
+    description="Type text into the focused control of a named application. This is a GUI fallback tool. Requires full_access and a target whose bundle id is listed in APPLE_SYSTEM_MCP_GUI_ALLOWED_APPS; terminals and apps that run typed code (Script Editor, Automator, Shortcuts, IDEs) are always refused.",
     annotations=ToolAnnotations(destructive_hint=True, idempotent_hint=False, open_world_hint=True),
     structured_output=True,
 )
@@ -690,7 +690,7 @@ def system_gui_type_text(text: str, application: str | None = None, bundle_id: s
 
 @mcp.tool(
     title="Click Button",
-    description="Click a named button in the front window of a named application. This is a GUI fallback tool. Requires full_access and refuses terminal apps.",
+    description="Click a named button in the front window of a named application. This is a GUI fallback tool. Requires full_access and a target whose bundle id is listed in APPLE_SYSTEM_MCP_GUI_ALLOWED_APPS; terminals and apps that run typed code (Script Editor, Automator, Shortcuts, IDEs) are always refused.",
     annotations=ToolAnnotations(destructive_hint=True, idempotent_hint=False, open_world_hint=True),
     structured_output=True,
 )
@@ -721,7 +721,7 @@ def system_gui_click_button(
 
 @mcp.tool(
     title="Choose Pop-Up Value",
-    description="Choose a value from a named pop-up button in the front window of a named application. This is a GUI fallback tool. Requires full_access and refuses terminal apps.",
+    description="Choose a value from a named pop-up button in the front window of a named application. This is a GUI fallback tool. Requires full_access and a target whose bundle id is listed in APPLE_SYSTEM_MCP_GUI_ALLOWED_APPS; terminals and apps that run typed code (Script Editor, Automator, Shortcuts, IDEs) are always refused.",
     annotations=ToolAnnotations(destructive_hint=True, idempotent_hint=False, open_world_hint=True),
     structured_output=True,
 )

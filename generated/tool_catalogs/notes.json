@@ -371,7 +371,7 @@
         "folder_id: string (optional)",
         "tags: array (optional)"
       ],
-      "description": "Update an existing note.",
+      "description": "Update an existing note. A title, body or tags change rewrites the whole body: checklist state may be lost and notes with attachments are refused. Moving with folder_id alone keeps the body.",
       "domain": "notes",
       "example_calls": [
         {
@@ -384,7 +384,7 @@
       ],
       "name": "notes_update_note",
       "read_only": false,
-      "risk_level": "medium",
+      "risk_level": "high",
       "schema_ref": "notes_update_note",
       "tags": [
         "notes",
@@ -392,10 +392,24 @@
         "memo",
         "not",
         "update",
-        "existing"
+        "existing",
+        "title",
+        "body",
+        "tags",
+        "tag",
+        "change",
+        "rewrites",
+        "rewrit",
+        "whole",
+        "checklist",
+        "state",
+        "may",
+        "lost",
+        "attachments",
+        "attachment"
       ],
       "title": "Update Note",
-      "usage_intent": "Update an existing note."
+      "usage_intent": "Update an existing note. A title, body or tags change rewrites the whole body: checklist state may be lost and notes with attachments are refused. Moving with folder_id alone keeps the body."
     },
     {
       "aliases": [

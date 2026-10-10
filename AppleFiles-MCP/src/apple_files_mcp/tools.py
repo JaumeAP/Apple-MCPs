@@ -42,6 +42,13 @@ def _error_response(error_code: str, message: str, suggestion: str | None = None
     return ErrorResponse(error=ToolError(error_code=error_code, message=message, suggestion=suggestion))
 
 
+def _exception_response(exc: SafetyError | FilesBridgeError | OSError) -> ErrorResponse:
+    if isinstance(exc, OSError):
+        # Permission or I/O failures on a path become a structured error, not a bare tool failure.
+        return _error_response("FILE_SYSTEM_ERROR", str(exc), "Check the path and its permissions.")
+    return _error_response(exc.error_code, exc.message, getattr(exc, "suggestion", None))
+
+
 def _resource_json(value: object) -> str:
     return json.dumps(value, indent=2, sort_keys=True, default=str)
 
@@ -197,8 +204,8 @@ def files_list_directory(path: str) -> FileListResponse | ErrorResponse:
         ensure_action_allowed("files_list_directory")
         entries = _bridge().list_directory(path)
         return FileListResponse(base_path=path, entries=entries, count=len(entries))
-    except (SafetyError, FilesBridgeError) as exc:
-        return _error_response(exc.error_code, exc.message, getattr(exc, "suggestion", None))
+    except (SafetyError, FilesBridgeError, OSError) as exc:
+        return _exception_response(exc)
 
 
 @mcp.tool(
@@ -212,8 +219,8 @@ def files_search_files(query: str, base_path: str | None = None, limit: int = 25
         ensure_action_allowed("files_search_files")
         entries = _bridge().search_files(query=query, base_path=base_path, limit=limit)
         return FileListResponse(base_path=base_path or "allowed-roots", entries=entries, count=len(entries))
-    except (SafetyError, FilesBridgeError) as exc:
-        return _error_response(exc.error_code, exc.message, getattr(exc, "suggestion", None))
+    except (SafetyError, FilesBridgeError, OSError) as exc:
+        return _exception_response(exc)
 
 
 @mcp.tool(
@@ -226,8 +233,8 @@ def files_get_file_info(path: str) -> FileResponse | ErrorResponse:
     try:
         ensure_action_allowed("files_get_file_info")
         return FileResponse(entry=_bridge().file_info(path))
-    except (SafetyError, FilesBridgeError) as exc:
-        return _error_response(exc.error_code, exc.message, getattr(exc, "suggestion", None))
+    except (SafetyError, FilesBridgeError, OSError) as exc:
+        return _exception_response(exc)
 
 
 @mcp.tool(
@@ -241,8 +248,8 @@ def files_read_text_file(path: str, max_bytes: int = 100_000) -> FileTextRespons
         ensure_action_allowed("files_read_text_file")
         text, truncated = _bridge().read_text_file(path=path, max_bytes=max_bytes)
         return FileTextResponse(path=path, text=text, truncated=truncated)
-    except (SafetyError, FilesBridgeError) as exc:
-        return _error_response(exc.error_code, exc.message, getattr(exc, "suggestion", None))
+    except (SafetyError, FilesBridgeError, OSError) as exc:
+        return _exception_response(exc)
 
 
 @mcp.tool(
@@ -256,8 +263,8 @@ def files_recent_files(limit: int = 25) -> FileListResponse | ErrorResponse:
         ensure_action_allowed("files_recent_files")
         entries = _bridge().recent_files(limit=limit)
         return FileListResponse(base_path="allowed-roots", entries=entries, count=len(entries))
-    except (SafetyError, FilesBridgeError) as exc:
-        return _error_response(exc.error_code, exc.message, getattr(exc, "suggestion", None))
+    except (SafetyError, FilesBridgeError, OSError) as exc:
+        return _exception_response(exc)
 
 
 @mcp.tool(
@@ -272,8 +279,8 @@ def files_open_path(path: str) -> FileActionResponse | ErrorResponse:
         opened = _bridge().open_path(path)
         info = _bridge().file_info(opened)
         return FileActionResponse(path=opened, action="opened", opened=True, revealed=False, is_icloud=info.is_icloud)
-    except (SafetyError, FilesBridgeError) as exc:
-        return _error_response(exc.error_code, exc.message, getattr(exc, "suggestion", None))
+    except (SafetyError, FilesBridgeError, OSError) as exc:
+        return _exception_response(exc)
 
 
 @mcp.tool(
@@ -288,8 +295,8 @@ def files_reveal_in_finder(path: str) -> FileActionResponse | ErrorResponse:
         revealed = _bridge().reveal_in_finder(path)
         info = _bridge().file_info(revealed)
         return FileActionResponse(path=revealed, action="revealed", opened=False, revealed=True, is_icloud=info.is_icloud)
-    except (SafetyError, FilesBridgeError) as exc:
-        return _error_response(exc.error_code, exc.message, getattr(exc, "suggestion", None))
+    except (SafetyError, FilesBridgeError, OSError) as exc:
+        return _exception_response(exc)
 
 
 @mcp.tool(
@@ -303,8 +310,8 @@ def files_get_tags(path: str) -> FileTagsResponse | ErrorResponse:
         ensure_action_allowed("files_get_tags")
         resolved_path, tags, is_icloud = _bridge().get_tags(path)
         return FileTagsResponse(path=resolved_path, tags=tags, count=len(tags), is_icloud=is_icloud)
-    except (SafetyError, FilesBridgeError) as exc:
-        return _error_response(exc.error_code, exc.message, getattr(exc, "suggestion", None))
+    except (SafetyError, FilesBridgeError, OSError) as exc:
+        return _exception_response(exc)
 
 
 @mcp.tool(
@@ -318,8 +325,8 @@ def files_set_tags(path: str, tags: list[str]) -> FileTagsResponse | ErrorRespon
         ensure_action_allowed("files_set_tags")
         resolved_path, current_tags, is_icloud = _bridge().set_tags(path, tags)
         return FileTagsResponse(path=resolved_path, tags=current_tags, count=len(current_tags), is_icloud=is_icloud)
-    except (SafetyError, FilesBridgeError) as exc:
-        return _error_response(exc.error_code, exc.message, getattr(exc, "suggestion", None))
+    except (SafetyError, FilesBridgeError, OSError) as exc:
+        return _exception_response(exc)
 
 
 @mcp.tool(
@@ -333,8 +340,8 @@ def files_add_tags(path: str, tags: list[str]) -> FileTagsResponse | ErrorRespon
         ensure_action_allowed("files_add_tags")
         resolved_path, current_tags, is_icloud = _bridge().add_tags(path, tags)
         return FileTagsResponse(path=resolved_path, tags=current_tags, count=len(current_tags), is_icloud=is_icloud)
-    except (SafetyError, FilesBridgeError) as exc:
-        return _error_response(exc.error_code, exc.message, getattr(exc, "suggestion", None))
+    except (SafetyError, FilesBridgeError, OSError) as exc:
+        return _exception_response(exc)
 
 
 @mcp.tool(
@@ -348,8 +355,8 @@ def files_remove_tags(path: str, tags: list[str]) -> FileTagsResponse | ErrorRes
         ensure_action_allowed("files_remove_tags")
         resolved_path, current_tags, is_icloud = _bridge().remove_tags(path, tags)
         return FileTagsResponse(path=resolved_path, tags=current_tags, count=len(current_tags), is_icloud=is_icloud)
-    except (SafetyError, FilesBridgeError) as exc:
-        return _error_response(exc.error_code, exc.message, getattr(exc, "suggestion", None))
+    except (SafetyError, FilesBridgeError, OSError) as exc:
+        return _exception_response(exc)
 
 
 @mcp.tool(
@@ -363,8 +370,8 @@ def files_list_recent_locations(limit: int = 15) -> RecentLocationsResponse | Er
         ensure_action_allowed("files_list_recent_locations")
         entries = _bridge().list_recent_locations(limit=limit)
         return RecentLocationsResponse(locations=entries, count=len(entries))
-    except (SafetyError, FilesBridgeError) as exc:
-        return _error_response(exc.error_code, exc.message, getattr(exc, "suggestion", None))
+    except (SafetyError, FilesBridgeError, OSError) as exc:
+        return _exception_response(exc)
 
 
 @mcp.tool(
@@ -377,8 +384,8 @@ def files_get_icloud_status() -> ICloudStatusResponse | ErrorResponse:
     try:
         ensure_action_allowed("files_get_icloud_status")
         return ICloudStatusResponse(**_bridge().icloud_status())
-    except (SafetyError, FilesBridgeError) as exc:
-        return _error_response(exc.error_code, exc.message, getattr(exc, "suggestion", None))
+    except (SafetyError, FilesBridgeError, OSError) as exc:
+        return _exception_response(exc)
 
 
 @mcp.tool(
@@ -393,8 +400,8 @@ async def files_create_folder(path: str, ctx: Context) -> FileMutationResponse |
         created = _bridge().create_folder(path)
         await notify_resources_changed(ctx)
         return FileMutationResponse(path=created, action="created")
-    except (SafetyError, FilesBridgeError) as exc:
-        return _error_response(exc.error_code, exc.message, getattr(exc, "suggestion", None))
+    except (SafetyError, FilesBridgeError, OSError) as exc:
+        return _exception_response(exc)
 
 
 @mcp.tool(
@@ -409,8 +416,8 @@ async def files_move_path(source: str, destination: str, ctx: Context) -> FileMu
         original, moved = _bridge().move_path(source=source, destination=destination)
         await notify_resources_changed(ctx)
         return FileMutationResponse(path=original, destination=moved, action="moved")
-    except (SafetyError, FilesBridgeError) as exc:
-        return _error_response(exc.error_code, exc.message, getattr(exc, "suggestion", None))
+    except (SafetyError, FilesBridgeError, OSError) as exc:
+        return _exception_response(exc)
 
 
 @mcp.tool(
@@ -425,8 +432,8 @@ async def files_delete_path(path: str, ctx: Context) -> FileMutationResponse | E
         deleted = _bridge().delete_path(path)
         await notify_resources_changed(ctx)
         return FileMutationResponse(path=deleted, action="deleted")
-    except (SafetyError, FilesBridgeError) as exc:
-        return _error_response(exc.error_code, exc.message, getattr(exc, "suggestion", None))
+    except (SafetyError, FilesBridgeError, OSError) as exc:
+        return _exception_response(exc)
 
 
 def _serialize_prompt_messages(messages: list[object]) -> list[dict[str, object]]:

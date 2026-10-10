@@ -35,9 +35,10 @@ def load_settings() -> Settings:
             str(Path.home() / ".apple-mcps" / "build"),
         )
     ).expanduser()
-    raw_safety_mode = os.environ.get("APPLE_CALENDAR_MCP_SAFETY_MODE", "safe_manage").strip() or "safe_manage"
+    raw_safety_mode = os.environ.get("APPLE_CALENDAR_MCP_SAFETY_MODE", "safe_manage").strip().lower() or "safe_manage"
     if raw_safety_mode not in VALID_SAFETY_MODES:
-        raw_safety_mode = "safe_manage"
+        # Fail closed: a mistyped mode must never grant write access.
+        raw_safety_mode = "safe_readonly"
 
     return Settings(
         server_name="Apple Calendar",

@@ -40,6 +40,9 @@ end run
 on note_json(accountId, accountName, folderId, folderName, n)
 	tell application "Notes" to set rawNoteId to id of n
 	set noteId to my safe_text(rawNoteId)
+	-- `n` is positional (item i of notes): pin it to the id so a concurrent
+	-- reorder cannot pair this id with another note's properties.
+	tell application "Notes" to set n to note id noteId
 	set titleText to ""
 	set plainText to ""
 	set createdEpoch to 0
@@ -140,7 +143,15 @@ on date_to_epoch(dateValue)
 	set month of epochDate to January
 	set day of epochDate to 1
 	set time of epochDate to 0
-	return (dateValue - epochDate) as integer
+	set elapsedSeconds to dateValue - epochDate
+	if elapsedSeconds < 0 then return "0"
+	-- Integers stop at 2^29, so any date after 1987 gives a real, and a real
+	-- becomes text with the locale's decimal separator ("1,79E+9" on ca_ES),
+	-- which is invalid JSON. Build the digits from two small integers.
+	set highPart to elapsedSeconds div 100000
+	set lowPart to (elapsedSeconds mod 100000) as integer
+	if highPart is 0 then return lowPart as text
+	return (highPart as text) & (text -5 thru -1 of ("0000" & lowPart))
 end date_to_epoch
 
 on safe_text(valueText)

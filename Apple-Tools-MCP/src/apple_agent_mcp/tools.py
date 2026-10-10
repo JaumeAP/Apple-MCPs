@@ -310,6 +310,7 @@ from apple_shortcuts_mcp.tools import (
 )
 from apple_system_mcp.models import ErrorResponse as SystemErrorResponse
 from apple_system_mcp.models import FocusStatusResponse, GuiActionResponse, GuiMenuItemsResponse, OpenAppResponse, SettingMutationResponse, SystemContextResponse
+from apple_system_mcp.tools import mcp as _system_mcp
 from apple_system_mcp.tools import (
     system_applications_resource,
     system_capture_context_prompt,
@@ -2933,7 +2934,16 @@ async def apple_completion(
     return types.Completion(values=[], total=0, hasMore=False)
 
 
+# GUI input tools keep the description and destructive annotations of their source
+# server, which state the full_access, allow-list and terminal refusals.
+_GUI_INPUT_TOOL_NAMES = frozenset(
+    {"system_gui_click_menu_path", "system_gui_press_keys", "system_gui_type_text", "system_gui_click_button", "system_gui_choose_popup_value"}
+)
+
+
 def _tool_annotations(name: str) -> ToolAnnotations:
+    if name in _GUI_INPUT_TOOL_NAMES:
+        return _system_mcp._tool_manager.get_tool(name).annotations
     if any(marker in name for marker in ("health", "list_", "get_", "search_", "view_", "resolve_")):
         return ToolAnnotations(read_only_hint=True, idempotent_hint=True)
     if any(marker in name for marker in ("delete_", "send_message")):
@@ -2946,6 +2956,8 @@ def _tool_title(name: str) -> str:
 
 
 def _tool_description(name: str) -> str:
+    if name in _GUI_INPUT_TOOL_NAMES:
+        return _system_mcp._tool_manager.get_tool(name).description
     return f"Delegated Apple domain tool '{name}' exposed through Apple-Tools-MCP."
 
 

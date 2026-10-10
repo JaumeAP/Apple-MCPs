@@ -33,6 +33,12 @@
             "full_access"
           ],
           "default": "safe_manage"
+        },
+        {
+          "name": "APPLE_SYSTEM_MCP_GUI_ALLOWED_APPS",
+          "description": "Comma-separated bundle ids the GUI input tools may target (full_access only). Empty refuses all; terminals and script-capable apps are always refused.",
+          "isRequired": false,
+          "format": "string"
         }
       ]
     },

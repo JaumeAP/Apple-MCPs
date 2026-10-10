@@ -90,6 +90,10 @@ claude mcp add --transport stdio --scope project apple-notes -- uvx apple-mcp-no
 
 `notes_delete_folder` deletes every note inside the folder, so it needs `full_access`. An unrecognized mode falls back to `safe_readonly`.
 
+With `APPLE_NOTES_MCP_ALLOWED_FOLDERS` set, every path honors the allowlist: the `notes://note/{note_id}` resource, both the source and the destination folder of a move (`notes_move_note`, `notes_update_note` with `folder_id`), and every nested subfolder that `notes_delete_folder` would delete along with its parent.
+
+Notes' AppleScript can only rewrite a note's whole body, so changing a note's title, body or tags drops its attachments. `notes_update_note` and `notes_append_to_note` refuse such notes with `NOTE_HAS_ATTACHMENTS`; moving a note keeps its body. An empty string for an optional argument (`title`, `body_html`, `folder_id`) means "no change", like leaving it out.
+
 ## Transport
 
 `stdio` is the default and recommended transport. Set `APPLE_NOTES_MCP_TRANSPORT=streamable-http` (with optional `APPLE_NOTES_MCP_HOST` and `APPLE_NOTES_MCP_PORT`) to serve Streamable HTTP instead.

@@ -38,15 +38,19 @@ class ShortcutsBridge:
     def _confine_path(self, path: str, *, is_output: bool = False) -> str:
         """Resolve a caller path with realpath and refuse it unless it sits inside an allowed root.
 
-        Hidden segments and ~/Library (except iCloud Drive) are refused even inside a root.
+        Hidden segments are refused even inside a root. ~/Library is refused unless the path sits
+        under an allowed root inside ~/Library (iCloud Drive by default, or an app folder you configure).
+        The Library checks ignore case: APFS is case-insensitive by default and realpath keeps the typed case.
         ponytail: checked before the CLI runs, so a symlink swapped in afterwards is not caught.
         """
         resolved = Path(os.path.realpath(Path(path).expanduser()))
-        library = Path(os.path.realpath(Path.home() / "Library"))
-        icloud = library / "Mobile Documents" / "com~apple~CloudDocs"
+        folded = Path(str(resolved).lower())
+        library = Path(os.path.realpath(Path.home() / "Library").lower())
+        library_roots = [Path(str(root).lower()) for root in self.allowed_roots]
+        library_roots = [root for root in library_roots if root.is_relative_to(library) and root != library]
         if (
             any(part.startswith(".") for part in resolved.parts)
-            or (resolved.is_relative_to(library) and not resolved.is_relative_to(icloud))
+            or (folded.is_relative_to(library) and not any(folded.is_relative_to(root) for root in library_roots))
             or not any(resolved.is_relative_to(root) for root in self.allowed_roots)
         ):
             raise ShortcutsBridgeError(
@@ -75,7 +79,8 @@ class ShortcutsBridge:
     def list_shortcuts(self, folder_name: str | None = None) -> list[ShortcutInfo]:
         args = ["list", "--show-identifiers"]
         if folder_name is not None:
-            args.extend(["--folder-name", folder_name])
+            # The --opt=value form keeps a value starting with "-" from being read as an option.
+            args.append(f"--folder-name={folder_name}")
         output = self._run_cli(args)
         items: list[ShortcutInfo] = []
         for line in self._split_lines(output.stdout):
@@ -109,7 +114,7 @@ class ShortcutsBridge:
         if output_path is not None:
             args.extend(["--output-path", output_path])
         if output_type is not None:
-            args.extend(["--output-type", output_type])
+            args.append(f"--output-type={output_type}")
         # "--" ends option parsing, so a shortcut name starting with "-" stays positional.
         args.extend(["--", shortcut.identifier or shortcut.name])
 
