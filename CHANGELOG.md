@@ -6,6 +6,13 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 ## [Unreleased]
 
+## [1.0.5-jap.16] - 2026-10-10 (JaumeAP fork)
+
+### Changed
+
+- Files: the plugin also allows `/Users/jap/projects/contabilitat`, next to the
+  invoices folder, so files can be copied between the two.
+
 ## [1.0.5-jap.15] - 2026-10-10 (JaumeAP fork)
 
 ### Added
