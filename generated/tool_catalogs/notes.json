@@ -410,7 +410,7 @@
         "body_text: string (optional)",
         "body_html: string (optional)"
       ],
-      "description": "Append text to an existing note without replacing its current content. Provide body_text for plain text or body_html for rich content.",
+      "description": "Append text to the end of an existing note. Notes has no native append, so the whole body is rewritten: checklist state may be lost and concurrent edits can be overwritten. Notes with attachments are refused. Provide body_text for plain text or body_html for rich content.",
       "domain": "notes",
       "example_calls": [
         {
@@ -423,7 +423,7 @@
       ],
       "name": "notes_append_to_note",
       "read_only": false,
-      "risk_level": "medium",
+      "risk_level": "high",
       "schema_ref": "notes_append_to_note",
       "tags": [
         "notes",
@@ -432,20 +432,23 @@
         "not",
         "append",
         "text",
+        "end",
         "existing",
-        "without",
-        "replacing",
-        "its",
-        "current",
-        "content",
-        "provide",
+        "has",
+        "native",
+        "whole",
         "body",
-        "plain",
-        "html",
-        "rich"
+        "rewritten",
+        "checklist",
+        "state",
+        "may",
+        "lost",
+        "concurrent",
+        "edits",
+        "edit"
       ],
       "title": "Append to Note",
-      "usage_intent": "Append text to an existing note without replacing its current content. Provide body_text for plain text or body_html for rich content."
+      "usage_intent": "Append text to the end of an existing note. Notes has no native append, so the whole body is rewritten: checklist state may be lost and concurrent edits can be overwritten. Notes with attachments are refused. Provide body_text for plain text or body_html for rich content."
     },
     {
       "aliases": [
@@ -613,7 +616,7 @@
       "argument_summary": [
         "folder_id: string (required)"
       ],
-      "description": "Delete an Apple Notes folder.",
+      "description": "Delete an Apple Notes folder together with every note inside it. Requires full_access.",
       "domain": "notes",
       "example_calls": [
         {
@@ -633,10 +636,17 @@
         "memo",
         "not",
         "delete",
-        "folder"
+        "folder",
+        "together",
+        "every",
+        "requires",
+        "requir",
+        "full",
+        "access",
+        "acces"
       ],
       "title": "Delete Folder",
-      "usage_intent": "Delete an Apple Notes folder."
+      "usage_intent": "Delete an Apple Notes folder together with every note inside it. Requires full_access."
     },
     {
       "aliases": [

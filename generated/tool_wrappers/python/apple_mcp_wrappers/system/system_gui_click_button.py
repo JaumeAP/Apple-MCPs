@@ -15,7 +15,7 @@ async def system_gui_click_button(
 ) -> Any:
     """Click Button
 
-    Click a named button in the frontmost window. This is a GUI fallback tool.
+    Click a named button in the front window of a named application. This is a GUI fallback tool. Requires full_access and refuses terminal apps.
 
     Example:
         await system_gui_click_button(client, label='example_label', description='example_description')

@@ -13,7 +13,7 @@ async def system_gui_type_text(
 ) -> Any:
     """Type Text
 
-    Type text into the frontmost focused control. This is a GUI fallback tool.
+    Type text into the focused control of a named application. This is a GUI fallback tool. Requires full_access and refuses terminal apps.
 
     Example:
         await system_gui_type_text(client, text='example_text', application='example_application')
