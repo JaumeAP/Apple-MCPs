@@ -91,10 +91,10 @@ claude mcp add --transport stdio --scope project apple-mail -- uvx apple-mcp-mai
 ## Safety Modes
 
 - `safe_readonly`, read and search only
-- `safe_manage`, read, create drafts, reply/forward, mark, move, delete, and archive threads; new-message sending is blocked
-- `full_access`, full Mail tool surface in this repo, including new-message sending
+- `safe_manage`, read, create drafts, mark, move, delete, and archive threads; nothing that sends mail (new messages, replies, forwards) is allowed
+- `full_access`, full Mail tool surface in this repo, including sending, replying and forwarding
 
-These are the existing policy rules. Deleting or archiving does not require switching from `safe_manage` to `full_access`.
+Deleting or archiving does not require switching from `safe_manage` to `full_access`. Replying and forwarding send mail immediately, so they need `full_access`.
 
 ## Transport
 
