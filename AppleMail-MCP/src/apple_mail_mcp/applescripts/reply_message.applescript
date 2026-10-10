@@ -217,13 +217,13 @@ on run argv
     end if
 
     tell application "Mail"
-        send replyMessage
+        set sentOk to send replyMessage
 
         set subjectText to ""
         try
             set subjectText to my sanitizeText(subject of replyMessage)
         end try
 
-        return my boolText(true) & fieldSeparator & subjectText & fieldSeparator & my boolText(shouldReplyAll) & fieldSeparator & resolvedAccountLabel & recordSeparator
+        return my boolText(sentOk is true) & fieldSeparator & subjectText & fieldSeparator & my boolText(shouldReplyAll) & fieldSeparator & resolvedAccountLabel & recordSeparator
     end tell
 end run

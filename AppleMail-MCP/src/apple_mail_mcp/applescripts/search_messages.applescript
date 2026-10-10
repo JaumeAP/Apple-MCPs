@@ -83,21 +83,19 @@ on run argv
             repeat with theMailbox in targetMailboxes
                 set mailboxLabel to name of theMailbox
                 set matchedMessages to {}
-                try
-                    if unreadOnly then
-                        if queryText is "" then
-                            set matchedMessages to (every message of theMailbox whose read status is false)
-                        else
-                            set matchedMessages to (every message of theMailbox whose (subject contains queryText or sender contains queryText) and read status is false)
-                        end if
+                if unreadOnly then
+                    if queryText is "" then
+                        set matchedMessages to (every message of theMailbox whose read status is false)
                     else
-                        if queryText is "" then
-                            set matchedMessages to (every message of theMailbox)
-                        else
-                            set matchedMessages to (every message of theMailbox whose (subject contains queryText or sender contains queryText))
-                        end if
+                        set matchedMessages to (every message of theMailbox whose (subject contains queryText or sender contains queryText) and read status is false)
                     end if
-                end try
+                else
+                    if queryText is "" then
+                        set matchedMessages to (every message of theMailbox)
+                    else
+                        set matchedMessages to (every message of theMailbox whose (subject contains queryText or sender contains queryText))
+                    end if
+                end if
 
                 repeat with theMessage in matchedMessages
                     if (count of rows) >= limitValue then exit repeat
@@ -113,7 +111,7 @@ on run argv
                         set senderText to my sanitizeText(sender of theMessage)
                     end try
                     try
-                        set dateText to my sanitizeText((date received of theMessage) as string)
+                        set dateText to my sanitizeText((date received of theMessage) as «class isot» as string)
                     end try
                     try
                         set appleId to (id of theMessage) as text

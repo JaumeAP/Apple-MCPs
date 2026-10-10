@@ -208,7 +208,9 @@ on run argv
     end if
 
     tell application "Mail"
-        send newMessage
+        set sentOk to send newMessage
     end tell
-    return "true" & fieldSeparator & my sanitizeText(subjectText) & fieldSeparator & resolvedAccountLabel & recordSeparator
+    set sentText to "false"
+    if sentOk is true then set sentText to "true"
+    return sentText & fieldSeparator & my sanitizeText(subjectText) & fieldSeparator & resolvedAccountLabel & recordSeparator
 end run
