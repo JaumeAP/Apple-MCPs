@@ -139,10 +139,16 @@ refused until you add the apps you want to drive. Terminals and apps that run ty
 Editor, Automator, Shortcuts, Xcode, VS Code, Cursor, Zed) are always refused, even when
 listed. Before sending input, the server brings the target to the front and aborts with
 `GUI_TARGET_NOT_FRONTMOST` unless it is the frontmost app, so background-only apps cannot
-receive GUI input.
+receive GUI input. Keystrokes still go to whatever holds keyboard focus: a non-activating
+panel such as Spotlight, a global hotkey, or a focus change during the input can receive
+them while the target stays frontmost. `system_health` lists the input tools only when the
+allow-list is set.
 
-`system_open_application` takes an application name or bundle id, never a path: a name
-is resolved to an installed bundle id and launched with `open -b`.
+`system_open_application` takes an application name or bundle id, never a path. Launch
+Services resolves it to an installed bundle, and only a bundle in `/Applications`,
+`~/Applications` or the system application folders is launched, by its exact path; build
+products, Downloads and other registered copies elsewhere are refused with
+`APPLICATION_NOT_TRUSTED`.
 
 - `system_gui_list_menu_bar_items`
 - `system_gui_click_menu_path`

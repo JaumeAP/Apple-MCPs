@@ -406,7 +406,7 @@
         "remind_at: string (optional)",
         "priority: integer (optional)"
       ],
-      "description": "Update one or more fields on an existing reminder. An empty list_id or notes leaves that field unchanged.",
+      "description": "Update one or more fields on an existing reminder. An empty list_id leaves the list unchanged; an empty notes clears the notes.",
       "domain": "reminders",
       "example_calls": [
         {
@@ -434,15 +434,16 @@
         "field",
         "existing",
         "empty",
-        "notes",
-        "not",
         "leaves",
         "leav",
-        "that",
-        "unchanged"
+        "unchanged",
+        "notes",
+        "not",
+        "clears",
+        "clear"
       ],
       "title": "Update Reminder",
-      "usage_intent": "Update one or more fields on an existing reminder. An empty list_id or notes leaves that field unchanged."
+      "usage_intent": "Update one or more fields on an existing reminder. An empty list_id leaves the list unchanged; an empty notes clears the notes."
     },
     {
       "aliases": [

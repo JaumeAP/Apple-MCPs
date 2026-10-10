@@ -10,7 +10,7 @@ from apple_calendar_mcp.models import CalendarInfo, CalendarListResponse, Delete
 from apple_calendar_mcp.permissions import SafetyError, ensure_action_allowed
 from apple_calendar_mcp.utils import parse_iso_datetime
 from apple_mcp_common.discovery import install_search_first_discovery
-from apple_mcp_common.runtime import notify_resources_changed, require_loopback_host
+from apple_mcp_common.runtime import notify_resources_changed, require_loopback_host, swift_trim
 
 SERVER_INSTRUCTIONS = (
     "Use this server for Apple Calendar on macOS. "
@@ -78,6 +78,11 @@ def _calendar_name_from_id(calendar_id: str | None) -> str | None:
         if calendar.calendar_id == calendar_id:
             return calendar.name
     return None
+
+
+def _clean_id(value: str | None) -> str | None:
+    # Trim as the Swift helper does, so the allowlist sees the id it acts on.
+    return (swift_trim(value) or None) if value is not None else None
 
 
 def _event_owner_calendar(event_id: str) -> str | None:
@@ -274,6 +279,8 @@ def calendar_list_calendars() -> CalendarListResponse | ErrorResponse:
 def calendar_list_events(start_iso: str, end_iso: str, calendar_id: str | None = None, limit: int | str = 100) -> EventListResponse | ErrorResponse:
     try:
         limit_value = _coerce_int_arg("limit", limit, minimum=1)
+        # An empty calendar_id means "every calendar", like an omitted one.
+        calendar_id = _clean_id(calendar_id)
         ensure_action_allowed("calendar_list_events", _calendar_name_from_id(calendar_id))
         start_value, end_value = _validate_time_window(start_iso, end_iso)
         events = _list_visible_events(start_value, end_value, calendar_id=calendar_id, limit=limit_value)
@@ -323,6 +330,7 @@ def calendar_create_event(
     try:
         if not title.strip():
             raise ValueError("title must not be empty")
+        calendar_id = swift_trim(calendar_id)
         ensure_action_allowed("calendar_create_event", _calendar_name_from_id(calendar_id))
         start_value, end_value = _validate_time_window(start_iso, end_iso)
         event = _bridge().create_event(
@@ -346,7 +354,7 @@ def calendar_create_event(
 
 @mcp.tool(
     title="Update Event",
-    description="Update one or more fields on an existing calendar event. With native Calendar access, a recurring event is changed for one occurrence only, not the rest of the series: the occurrence named by an event_id from list or get (\"<id>@<start>\"), or the first occurrence for a bare id. The automation fallback may act on the whole series. An empty notes or location leaves that field unchanged.",
+    description="Update one or more fields on an existing calendar event. With native Calendar access, a recurring event is changed for one occurrence only, not the rest of the series: the occurrence named by an event_id from list or get (\"<id>@<original start>\"), or the first occurrence for a bare id. The automation fallback may act on the whole series. An empty notes or location clears that field; an empty calendar_id does not move the event.",
     annotations=ToolAnnotations(destructive_hint=False, idempotent_hint=False, open_world_hint=False),
     structured_output=True,
 )
@@ -363,6 +371,8 @@ def calendar_update_event(
 ) -> EventResponse | ErrorResponse:
     try:
         ensure_action_allowed("calendar_update_event", _event_owner_calendar(event_id))
+        # An empty calendar_id means "do not move".
+        calendar_id = _clean_id(calendar_id)
         if calendar_id is not None:
             # A move is a write to the destination as much as to the source, so the
             # destination is checked too -- otherwise an allowlisted calendar's events
@@ -388,7 +398,7 @@ def calendar_update_event(
 
 @mcp.tool(
     title="Delete Event",
-    description="Delete a calendar event by event_id. With native Calendar access, a recurring event is deleted for one occurrence only, not the rest of the series: the occurrence named by an event_id from list or get (\"<id>@<start>\"), or the first occurrence for a bare id. The automation fallback may delete the whole series.",
+    description="Delete a calendar event by event_id. With native Calendar access, a recurring event is deleted for one occurrence only, not the rest of the series: the occurrence named by an event_id from list or get (\"<id>@<original start>\"), or the first occurrence for a bare id. The automation fallback may delete the whole series.",
     annotations=ToolAnnotations(destructive_hint=True, idempotent_hint=False, open_world_hint=False),
     structured_output=True,
 )

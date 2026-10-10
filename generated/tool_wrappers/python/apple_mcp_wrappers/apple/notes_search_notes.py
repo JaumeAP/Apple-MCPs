@@ -15,7 +15,7 @@ async def notes_search_notes(
 ) -> Any:
     """Notes Search Notes
 
-    Delegated Apple domain tool 'notes_search_notes' exposed through Apple-Tools-MCP.
+    Search notes by text, folder, or account.
 
     Example:
         await notes_search_notes(client, query='find apple', account_name='example_account_name')

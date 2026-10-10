@@ -6,6 +6,22 @@ from mcp_types.version import MODERN_PROTOCOL_VERSIONS
 
 CANONICAL_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 
+# Exactly Foundation's CharacterSet.whitespacesAndNewlines (enumerated with
+# swiftc on macOS 26). It differs from str.strip(): it trims U+200B and keeps
+# U+001C-U+001F.
+SWIFT_WHITESPACE = "".join(
+    map(chr, (0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x20, 0x85, 0xA0, 0x1680, *range(0x2000, 0x200C), 0x2028, 0x2029, 0x202F, 0x205F, 0x3000))
+)
+
+
+def swift_trim(value: str) -> str:
+    """Trim the way the Swift helpers trim ids and strings.
+
+    Python must see the same id the helper will act on: an allowlist lookup on
+    an id the helper later trims differently is an allowlist bypass.
+    """
+    return value.strip(SWIFT_WHITESPACE)
+
 
 def require_loopback_host(host: str) -> str:
     """Return a canonical loopback HTTP host or reject it.

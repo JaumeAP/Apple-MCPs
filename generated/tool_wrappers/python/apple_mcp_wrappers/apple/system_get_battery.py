@@ -10,7 +10,7 @@ async def system_get_battery(
 ) -> Any:
     """System Get Battery
 
-    Delegated Apple domain tool 'system_get_battery' exposed through Apple-Tools-MCP.
+    Get the current battery state from macOS.
 
     Example:
         await system_get_battery(client)

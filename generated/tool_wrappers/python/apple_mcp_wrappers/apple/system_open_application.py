@@ -12,7 +12,7 @@ async def system_open_application(
 ) -> Any:
     """System Open Application
 
-    Delegated Apple domain tool 'system_open_application' exposed through Apple-Tools-MCP.
+    Open an application by name using macOS.
 
     Example:
         await system_open_application(client, application='example_application', bundle_id='example_bundle_id')

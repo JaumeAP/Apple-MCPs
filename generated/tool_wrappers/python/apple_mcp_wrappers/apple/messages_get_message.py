@@ -11,7 +11,7 @@ async def messages_get_message(
 ) -> Any:
     """Messages Get Message
 
-    Delegated Apple domain tool 'messages_get_message' exposed through Apple-Tools-MCP.
+    Fetch a single Apple Messages message by message_id.
 
     Example:
         await messages_get_message(client, message_id='example_message_id')

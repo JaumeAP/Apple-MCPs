@@ -101,7 +101,8 @@ def test_mutation_timeout_does_not_suggest_a_blind_retry(monkeypatch) -> None:
     assert "before retrying" in excinfo.value.suggestion
 
 
-def test_update_reminder_treats_empty_notes_as_no_change(monkeypatch) -> None:
+def test_update_reminder_sends_empty_notes_to_clear_them(monkeypatch) -> None:
+    # The helper reads "" as "clear": the only way to remove notes, since None means no change.
     bridge = RemindersBridge(Path("/tmp/source.swift"), Path("/tmp/helper"))
     requests: list[tuple[str, ...]] = []
 
@@ -113,8 +114,12 @@ def test_update_reminder_treats_empty_notes_as_no_change(monkeypatch) -> None:
     monkeypatch.setattr(reminders_bridge.ReminderDetail, "model_validate", staticmethod(lambda payload: payload))
 
     bridge.update_reminder("x-apple-reminder://r", title="New", notes="")
+    bridge.update_reminder("x-apple-reminder://r", title="New")
 
-    assert requests == [("update-reminder", "x-apple-reminder://r", '{"title": "New"}')]
+    assert requests == [
+        ("update-reminder", "x-apple-reminder://r", '{"title": "New", "notes": ""}'),
+        ("update-reminder", "x-apple-reminder://r", '{"title": "New"}'),
+    ]
 
 
 def test_delete_reminder_list_refuses_mixed_event_calendars() -> None:

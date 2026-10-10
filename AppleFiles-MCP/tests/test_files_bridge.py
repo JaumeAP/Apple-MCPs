@@ -255,20 +255,21 @@ def test_open_path_location_docs_executable_documents_and_unreadable(monkeypatch
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     bridge = FilesBridge((tmp_path,))
-    for name in ("app.jar", "server.afploc", "share.smbloc", "host.vncloc", "site.ftploc"):
+    # Scripts are refused without the execute bit too: their default handler may run them.
+    for name in ("app.jar", "Payload.class", "launch.jnlp", "session.term", "server.afploc", "share.smbloc", "host.vncloc", "site.ftploc", "job.py"):
         (tmp_path / name).write_text("x")
         with pytest.raises(FilesBridgeError) as excinfo:
             bridge.open_path(str(tmp_path / name))
         assert excinfo.value.error_code == "UNSAFE_OPEN_TARGET"
-    script = tmp_path / "job.py"
-    script.write_text("print(1)")
-    script.chmod(0o755)
-    with pytest.raises(FilesBridgeError):
-        bridge.open_path(str(script))
-    # A photo copied from exFAT keeps -rwxrwxrwx and must still open.
-    photo = tmp_path / "photo.jpg"
+    # Any executable file is refused, whatever its type.
+    executable = tmp_path / "photo.jpg"
+    executable.write_bytes(b"\xff\xd8\xff")
+    executable.chmod(0o755)
+    with pytest.raises(FilesBridgeError) as excinfo:
+        bridge.open_path(str(executable))
+    assert excinfo.value.error_code == "UNSAFE_OPEN_TARGET"
+    photo = tmp_path / "plain.jpg"
     photo.write_bytes(b"\xff\xd8\xff")
-    photo.chmod(0o777)
     bridge.open_path(str(photo))
     assert calls == [["open", "--", str(photo.resolve())]]
     locked = tmp_path / "locked.pdf"

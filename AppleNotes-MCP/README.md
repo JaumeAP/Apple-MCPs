@@ -90,7 +90,7 @@ claude mcp add --transport stdio --scope project apple-notes -- uvx apple-mcp-no
 
 `notes_delete_folder` deletes every note inside the folder, so it needs `full_access`. An unrecognized mode falls back to `safe_readonly`.
 
-With `APPLE_NOTES_MCP_ALLOWED_FOLDERS` set, every path honors the allowlist: the `notes://note/{note_id}` resource, both the source and the destination folder of a move (`notes_move_note`, `notes_update_note` with `folder_id`), and every nested subfolder that `notes_delete_folder` would delete along with its parent.
+With `APPLE_NOTES_MCP_ALLOWED_FOLDERS` set, every path honors the allowlist: the `notes://note/{note_id}` resource, both the source and the destination folder of a move (`notes_move_note`, `notes_update_note` with `folder_id`), every nested subfolder that `notes_delete_folder` would delete along with its parent, the parent of a folder created with `notes_create_folder`, and the folder listings (`notes_list_folders`, `notes://folders`), which hide blocked folders. The checks match folder names, so a folder named like an allowed one is allowed wherever it sits.
 
 Notes' AppleScript can only rewrite a note's whole body, so changing a note's title, body or tags drops its attachments. `notes_update_note` and `notes_append_to_note` refuse such notes with `NOTE_HAS_ATTACHMENTS`; moving a note keeps its body. An empty string for an optional argument (`title`, `body_html`, `folder_id`) means "no change", like leaving it out.
 

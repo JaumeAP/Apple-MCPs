@@ -12,7 +12,7 @@ async def contacts_search_contacts(
 ) -> Any:
     """Contacts Search Contacts
 
-    Delegated Apple domain tool 'contacts_search_contacts' exposed through Apple-Tools-MCP.
+    Search Apple Contacts by name, phone number, or email address.
 
     Example:
         await contacts_search_contacts(client, query='find apple', limit=1)

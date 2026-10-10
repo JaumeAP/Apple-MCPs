@@ -13,7 +13,7 @@ async def files_search_files(
 ) -> Any:
     """Files Search Files
 
-    Delegated Apple domain tool 'files_search_files' exposed through Apple-Tools-MCP.
+    Search file and folder names inside the allowed roots.
 
     Example:
         await files_search_files(client, query='find apple', base_path='/path/to/item')

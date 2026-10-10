@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+import sys
 from collections.abc import Callable
 from dataclasses import asdict, is_dataclass
 from datetime import UTC, datetime, timedelta
@@ -310,7 +311,6 @@ from apple_shortcuts_mcp.tools import (
 )
 from apple_system_mcp.models import ErrorResponse as SystemErrorResponse
 from apple_system_mcp.models import FocusStatusResponse, GuiActionResponse, GuiMenuItemsResponse, OpenAppResponse, SettingMutationResponse, SystemContextResponse
-from apple_system_mcp.tools import mcp as _system_mcp
 from apple_system_mcp.tools import (
     system_applications_resource,
     system_capture_context_prompt,
@@ -2450,8 +2450,12 @@ def apple_update_system_setting(
 
 @mcp.tool(
     title="Apple Control Frontmost App",
-    description="Use the unified Apple control plane for bounded GUI fallback actions when a native app-domain tool cannot complete the task.",
-    annotations=ToolAnnotations(destructive_hint=False, idempotent_hint=False, open_world_hint=True),
+    description=(
+        "Use the unified Apple control plane for bounded GUI fallback actions when a native app-domain tool cannot complete the task. "
+        "Input actions (click, keys, type) require full_access and a target whose bundle id is listed in APPLE_SYSTEM_MCP_GUI_ALLOWED_APPS; "
+        "terminals and apps that run typed code are always refused."
+    ),
+    annotations=ToolAnnotations(destructive_hint=True, idempotent_hint=False, open_world_hint=True),
     structured_output=True,
 )
 def apple_control_frontmost_app(
@@ -2934,16 +2938,22 @@ async def apple_completion(
     return types.Completion(values=[], total=0, hasMore=False)
 
 
-# GUI input tools keep the description and destructive annotations of their source
-# server, which state the full_access, allow-list and terminal refusals.
-_GUI_INPUT_TOOL_NAMES = frozenset(
-    {"system_gui_click_menu_path", "system_gui_press_keys", "system_gui_type_text", "system_gui_click_button", "system_gui_choose_popup_value"}
-)
+def _source_tool(name: str) -> Any:
+    # Every domain tools module registers its tools on its own `mcp`; re-exported tools
+    # keep that registration's annotations (destructive hints) instead of a guess.
+    for module_name, module in list(sys.modules.items()):
+        source_mcp = getattr(module, "mcp", None)
+        if module_name.endswith("_mcp.tools") and source_mcp is not None and source_mcp is not mcp:
+            tool = source_mcp._tool_manager.get_tool(name)
+            if tool is not None:
+                return tool
+    return None
 
 
 def _tool_annotations(name: str) -> ToolAnnotations:
-    if name in _GUI_INPUT_TOOL_NAMES:
-        return _system_mcp._tool_manager.get_tool(name).annotations
+    source = _source_tool(name)
+    if source is not None and source.annotations is not None:
+        return source.annotations
     if any(marker in name for marker in ("health", "list_", "get_", "search_", "view_", "resolve_")):
         return ToolAnnotations(read_only_hint=True, idempotent_hint=True)
     if any(marker in name for marker in ("delete_", "send_message")):
@@ -2955,9 +2965,12 @@ def _tool_title(name: str) -> str:
     return name.replace("_", " ").title()
 
 
-def _tool_description(name: str) -> str:
-    if name in _GUI_INPUT_TOOL_NAMES:
-        return _system_mcp._tool_manager.get_tool(name).description
+def _tool_description(name: str, tool_fn: Any = None) -> str:
+    # The source description fits only when the source function itself is
+    # re-exported; a local wrapper may take different arguments.
+    source = _source_tool(name)
+    if source is not None and source.description and source.fn is tool_fn:
+        return source.description
     return f"Delegated Apple domain tool '{name}' exposed through Apple-Tools-MCP."
 
 
@@ -3268,7 +3281,7 @@ for tool_fn in UNIFIED_TOOL_FUNCTIONS:
         tool_fn,
         name=tool_fn.__name__,
         title=_tool_title(tool_fn.__name__),
-        description=_tool_description(tool_fn.__name__),
+        description=_tool_description(tool_fn.__name__, tool_fn),
         annotations=_tool_annotations(tool_fn.__name__),
         structured_output=True,
     )

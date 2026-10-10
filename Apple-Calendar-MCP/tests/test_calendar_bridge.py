@@ -1352,7 +1352,8 @@ def test_mutation_timeout_does_not_suggest_a_blind_retry(monkeypatch):
     assert "before retrying" in failure.value.suggestion
 
 
-def test_helper_compile_timeout_falls_back_to_automation(monkeypatch):
+def test_helper_compile_timeout_falls_back_for_reads_but_not_writes(monkeypatch):
+    # A JXA write minutes after the client gave up would be duplicated by its retry.
     bridge = CalendarBridge(Path("/tmp/source.swift"), Path("/tmp/helper"))
 
     def compile_timeout(command: str, *args: str) -> dict[str, object]:
@@ -1360,11 +1361,51 @@ def test_helper_compile_timeout_falls_back_to_automation(monkeypatch):
 
     monkeypatch.setattr(bridge, "_run_helper", compile_timeout)
     monkeypatch.setattr(bridge, "_fallback_delete_event", lambda event_id: {"deleted": True})
+    monkeypatch.setattr(bridge, "_fallback_get_event", lambda event_id: {"event_id": event_id, "title": "Read"})
 
-    assert bridge.delete_event("native-1") is True
+    with pytest.raises(CalendarBridgeError) as failure:
+        bridge.delete_event("native-1")
+    assert failure.value.error_code == "HELPER_COMPILE_TIMEOUT"
+    assert bridge.get_event("native-1").title == "Read"
 
 
-def test_update_event_treats_empty_notes_and_location_as_no_change(monkeypatch):
+def test_failed_helper_compile_is_not_retried_in_the_process(monkeypatch, tmp_path):
+    source = tmp_path / "source.swift"
+    source.write_text("// helper")
+    calls = []
+
+    def stalled_swiftc(command, **kwargs):
+        calls.append(command)
+        raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+
+    monkeypatch.setattr(subprocess, "run", stalled_swiftc)
+    for _ in range(3):
+        # Each tool call builds a new bridge; the failure is remembered across them.
+        with pytest.raises(CalendarBridgeError) as failure:
+            CalendarBridge(source, tmp_path / "helper.app/Contents/MacOS/helper")._ensure_helper()
+        assert failure.value.error_code == "HELPER_COMPILE_TIMEOUT"
+    assert len(calls) == 1
+
+
+def test_occurrence_id_miss_does_not_fall_back_to_automation(monkeypatch):
+    bridge = CalendarBridge(Path("/tmp/source.swift"), Path("/tmp/helper"))
+
+    def not_found(command: str, *args: str) -> dict[str, object]:
+        raise CalendarBridgeError("EVENT_NOT_FOUND", "gone")
+
+    def unexpected(*args, **kwargs):
+        raise AssertionError("JXA cannot resolve an occurrence id")
+
+    monkeypatch.setattr(bridge, "_run_helper", not_found)
+    monkeypatch.setattr(bridge, "_fallback_delete_event", unexpected)
+
+    with pytest.raises(CalendarBridgeError) as failure:
+        bridge.delete_event("ABC-123@2026-10-12T07:00:00Z")
+    assert failure.value.error_code == "EVENT_NOT_FOUND"
+
+
+def test_update_event_sends_empty_notes_and_location_to_clear_them(monkeypatch):
+    # The helper reads "" as "clear": the only way to remove them, since None means no change.
     bridge = CalendarBridge(Path("/tmp/source.swift"), Path("/tmp/helper"))
     requests = []
 
@@ -1374,9 +1415,13 @@ def test_update_event_treats_empty_notes_and_location_as_no_change(monkeypatch):
 
     monkeypatch.setattr(bridge, "_run_helper", fake_run_helper)
 
-    bridge.update_event("native-1", title="New", notes="", location="  ")
+    bridge.update_event("native-1", title="New", notes="", location="")
+    bridge.update_event("native-1", title="New")
 
-    assert requests == [("update-calendar-event", "native-1", '{"title": "New"}')]
+    assert requests == [
+        ("update-calendar-event", "native-1", '{"title": "New", "notes": "", "location": ""}'),
+        ("update-calendar-event", "native-1", '{"title": "New"}'),
+    ]
 
 
 def test_recurring_events_get_occurrence_ids_in_the_helper():

@@ -19,7 +19,7 @@ async def reminders_create_reminder(
 ) -> Any:
     """Reminders Create Reminder
 
-    Delegated Apple domain tool 'reminders_create_reminder' exposed through Apple-Tools-MCP.
+    Create a new reminder in a specific Apple Reminders list.
 
     Example:
         await reminders_create_reminder(client, title='example_title', list_id='example_list_id')

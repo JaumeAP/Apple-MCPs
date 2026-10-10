@@ -10,7 +10,7 @@ async def system_get_clipboard(
 ) -> Any:
     """System Get Clipboard
 
-    Delegated Apple domain tool 'system_get_clipboard' exposed through Apple-Tools-MCP.
+    Read the current text clipboard contents.
 
     Example:
         await system_get_clipboard(client)

@@ -11,7 +11,7 @@ async def contacts_get_contact(
 ) -> Any:
     """Contacts Get Contact
 
-    Delegated Apple domain tool 'contacts_get_contact' exposed through Apple-Tools-MCP.
+    Fetch full details for an Apple Contacts record by contact_id.
 
     Example:
         await contacts_get_contact(client, contact_id='example_contact_id')

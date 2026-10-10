@@ -6,6 +6,7 @@ import os
 import plistlib
 import re
 import subprocess
+import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -93,11 +94,12 @@ class SystemBridge:
     _BUNDLE_ID_PATTERN: ClassVar[re.Pattern[str]] = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
     _PREFERENCE_DOMAIN_PATTERN: ClassVar[re.Pattern[str]] = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*(\.[A-Za-z0-9_-]+)+|[A-Za-z][A-Za-z0-9_-]*")
     # Brings the application whose bundle identifier is `targetBundle` to the front and
-    # aborts unless it is frontmost, since System Events keystrokes and clicks go to the
-    # frontmost application. A background-only app never comes to the front, so it is
-    # refused here too.
-    # ponytail: a window can still steal focus between this check and the input; no
-    # unsigned API closes that race.
+    # aborts unless it is frontmost. A background-only app never comes to the front, so
+    # it is refused here too. Keystrokes still go to whatever holds keyboard focus, not
+    # to the process in the `tell`: a non-activating panel such as Spotlight, a global
+    # hotkey, or a focus change during the input can receive them while the target
+    # stays frontmost.
+    # ponytail: frontmost check only; checking the AX focused application needs Accessibility access for the helper.
     _FRONTMOST_GUARD: ClassVar[list[str]] = [
         "tell application id targetBundle to activate",
         'tell application "System Events"',
@@ -211,7 +213,7 @@ class SystemBridge:
         """Return the compiled apps helper for the current source, compiling it if needed.
 
         The binary name carries a hash of the source, so an existing binary is always
-        current. Compilation writes to a per-process temporary file and renames it into
+        current. Compilation writes to a per-call temporary file and renames it into
         place, so concurrent servers never run a half-written binary.
         """
         try:
@@ -226,9 +228,13 @@ class SystemBridge:
         binary = self.apps_helper_binary.with_name(f"{self.apps_helper_binary.name}-{digest}")
         if binary.exists():
             return binary
-        binary.parent.mkdir(parents=True, exist_ok=True)
-        temporary = binary.with_name(f"{binary.name}.{os.getpid()}.tmp")
+        # A per-call name: the pid is shared by every thread of this server.
+        temporary = binary.with_name(f"{binary.name}.{uuid.uuid4().hex}.tmp")
         try:
+            try:
+                binary.parent.mkdir(parents=True, exist_ok=True)
+            except OSError as exc:
+                raise SystemBridgeError("HELPER_INSTALL_FAILED", f"Could not create the helper directory: {exc}.", "Retry the request.") from exc
             try:
                 completed = subprocess.run(
                     ["swiftc", "-O", str(self.apps_helper_source), "-o", str(temporary)],
@@ -255,7 +261,10 @@ class SystemBridge:
                     completed.stderr.strip() or completed.stdout.strip() or "Failed to compile the native helper.",
                     "Confirm Xcode command line tools and Swift are available, then retry.",
                 )
-            os.replace(temporary, binary)
+            try:
+                os.replace(temporary, binary)
+            except OSError as exc:
+                raise SystemBridgeError("HELPER_INSTALL_FAILED", f"Could not install the compiled native helper: {exc}.", "Retry the request.") from exc
         finally:
             temporary.unlink(missing_ok=True)
         return binary
@@ -366,11 +375,28 @@ class SystemBridge:
             args=[body, title, subtitle or ""],
         )
 
+    @staticmethod
+    def _trusted_app_roots() -> tuple[str, ...]:
+        # System locations are on the sealed system volume (Safari lives in the App
+        # cryptex); ~/Applications holds user installs. Build products, Downloads and
+        # other registered bundles elsewhere on disk are never launched.
+        return (
+            "/Applications/",
+            "/System/Applications/",
+            "/System/Library/CoreServices/",
+            "/System/Volumes/Preboot/Cryptexes/App/System/Applications/",
+            f"{Path.home()}/Applications/",
+        )
+
     def open_application(self, application: str | None = None, bundle_id: str | None = None) -> AppRecord:
-        # `open -a` also accepts a path, which would launch any bundle on disk, so an
-        # application name is resolved to an installed bundle id first and launched by id.
+        # Launch Services resolves a name or bundle id to any registered bundle on disk,
+        # so the resolved path must be in a trusted install location, and that exact
+        # bundle is launched (`open -b` could pick another copy with the same id).
         if bundle_id and bundle_id.strip():
             target_bundle_id = bundle_id.strip()
+            if not self._BUNDLE_ID_PATTERN.fullmatch(target_bundle_id):
+                raise SystemBridgeError("INVALID_INPUT", f"Invalid bundle identifier '{target_bundle_id}'.", "Provide a reverse-DNS bundle identifier such as com.apple.Safari.")
+            payload = self._run_apps_helper("installed-bundle-id", target_bundle_id)
         elif application and application.strip():
             name = application.strip()
             if "/" in name or name.lower().endswith(".app"):
@@ -379,13 +405,19 @@ class SystemBridge:
                     f"Invalid application name '{name}'.",
                     "Use an application name such as Safari or a bundle_id; paths and .app bundles are not accepted.",
                 )
-            target_bundle_id = self._app_record(self._run_apps_helper("installed-name", name)).bundle_id or ""
+            payload = self._run_apps_helper("installed-name", name)
         else:
             raise SystemBridgeError("INVALID_INPUT", "application or bundle_id is required.", "Provide an application name or bundle identifier.")
-        if not self._BUNDLE_ID_PATTERN.fullmatch(target_bundle_id):
-            raise SystemBridgeError("INVALID_INPUT", f"Invalid bundle identifier '{target_bundle_id}'.", "Provide a reverse-DNS bundle identifier such as com.apple.Safari.")
-        self._run("open", "-b", target_bundle_id)
-        return self._target_application(bundle_id=target_bundle_id)
+        resolved_bundle_id = self._app_record(payload).bundle_id or ""
+        app_path = os.path.normpath(str(payload.get("path") or "/")) if isinstance(payload, dict) else ""
+        if not app_path.endswith(".app") or not (app_path + "/").startswith(self._trusted_app_roots()):
+            raise SystemBridgeError(
+                "APPLICATION_NOT_TRUSTED",
+                f"'{application or bundle_id}' resolves to '{app_path or 'an unknown location'}', outside the trusted application folders.",
+                "Install the application in /Applications or ~/Applications.",
+            )
+        self._run("open", "-a", app_path)
+        return self._target_application(bundle_id=resolved_bundle_id)
 
     def list_settings_domains(self) -> list[dict[str, str]]:
         return [

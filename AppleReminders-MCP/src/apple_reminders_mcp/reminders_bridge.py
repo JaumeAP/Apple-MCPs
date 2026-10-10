@@ -119,10 +119,8 @@ class RemindersBridge:
         parent_reminder_id: str | None = None,
         tags: list[str] | None = None,
     ) -> ReminderDetail:
-        # The helper reads an empty string as "clear", so '' would silently erase
-        # the notes. Treat it as "no change", like every other omitted field.
-        if notes is not None and not notes.strip():
-            notes = None
+        # The helper reads an empty (or whitespace-only) string as "clear": that
+        # is the only way to remove notes, since None means "no change".
         request: dict[str, object] = {}
         if title is not None:
             request["title"] = title

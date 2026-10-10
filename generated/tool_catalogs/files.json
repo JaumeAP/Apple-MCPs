@@ -1,7 +1,7 @@
 {
   "domain": "files",
   "server": "Apple Files MCP",
-  "tool_count": 23,
+  "tool_count": 25,
   "tools": [
     {
       "aliases": [
@@ -918,6 +918,65 @@
         "finder",
         "icloud",
         "downloads",
+        "create file",
+        "files create file"
+      ],
+      "argument_summary": [
+        "path: string (required)",
+        "text: string (optional)",
+        "content_base64: string (optional)"
+      ],
+      "description": "Create a new file inside the allowed roots. Pass text for UTF-8 content or content_base64 for binary content, exactly one of them. The parent folder must exist and the path must not. Never overwrites.",
+      "domain": "files",
+      "example_calls": [
+        {
+          "arguments": {
+            "path": "/path/to/item",
+            "text": "example_text"
+          },
+          "tool": "files_create_file"
+        }
+      ],
+      "name": "files_create_file",
+      "read_only": false,
+      "risk_level": "medium",
+      "schema_ref": "files_create_file",
+      "tags": [
+        "files",
+        "file",
+        "folder",
+        "folders",
+        "document",
+        "documents",
+        "finder",
+        "icloud",
+        "downloads",
+        "fil",
+        "create",
+        "new",
+        "allowed",
+        "roots",
+        "root",
+        "pass",
+        "pas",
+        "text",
+        "utf",
+        "content"
+      ],
+      "title": "Create File",
+      "usage_intent": "Create a new file inside the allowed roots. Pass text for UTF-8 content or content_base64 for binary content, exactly one of them. The parent folder must exist and the path must not. Never overwrites."
+    },
+    {
+      "aliases": [
+        "file",
+        "files",
+        "folder",
+        "folders",
+        "document",
+        "documents",
+        "finder",
+        "icloud",
+        "downloads",
         "move path",
         "files move path"
       ],
@@ -972,18 +1031,78 @@
         "finder",
         "icloud",
         "downloads",
-        "delete path",
-        "files delete path"
+        "copy path",
+        "files copy path"
       ],
       "argument_summary": [
-        "path: string (required)"
+        "source: string (required)",
+        "destination: string (required)"
       ],
-      "description": "Delete a file or empty folder inside the allowed roots. Requires full_access safety mode.",
+      "description": "Copy a file, byte for byte, or a whole folder with everything in it to a new path inside the allowed roots. The destination must not exist; nothing is overwritten.",
       "domain": "files",
       "example_calls": [
         {
           "arguments": {
-            "path": "/path/to/item"
+            "destination": "example_destination",
+            "source": "example_source"
+          },
+          "tool": "files_copy_path"
+        }
+      ],
+      "name": "files_copy_path",
+      "read_only": false,
+      "risk_level": "medium",
+      "schema_ref": "files_copy_path",
+      "tags": [
+        "files",
+        "file",
+        "folder",
+        "folders",
+        "document",
+        "documents",
+        "finder",
+        "icloud",
+        "downloads",
+        "fil",
+        "copy",
+        "path",
+        "byte",
+        "whole",
+        "everything",
+        "new",
+        "allowed",
+        "roots",
+        "root",
+        "destination"
+      ],
+      "title": "Copy Path",
+      "usage_intent": "Copy a file, byte for byte, or a whole folder with everything in it to a new path inside the allowed roots. The destination must not exist; nothing is overwritten."
+    },
+    {
+      "aliases": [
+        "file",
+        "files",
+        "folder",
+        "folders",
+        "document",
+        "documents",
+        "finder",
+        "icloud",
+        "downloads",
+        "delete path",
+        "files delete path"
+      ],
+      "argument_summary": [
+        "path: string (required)",
+        "recursive: boolean (optional)"
+      ],
+      "description": "Delete a file or a folder inside the allowed roots. A folder with content needs recursive=true, which deletes it and everything in it. An allowed root is never deleted. Requires full_access safety mode.",
+      "domain": "files",
+      "example_calls": [
+        {
+          "arguments": {
+            "path": "/path/to/item",
+            "recursive": false
           },
           "tool": "files_delete_path"
         }
@@ -1005,17 +1124,17 @@
         "fil",
         "delete",
         "path",
-        "empty",
         "allowed",
         "roots",
         "root",
-        "requires",
-        "requir",
-        "full",
-        "access"
+        "content",
+        "needs",
+        "need",
+        "recursive",
+        "true"
       ],
       "title": "Delete Path",
-      "usage_intent": "Delete a file or empty folder inside the allowed roots. Requires full_access safety mode."
+      "usage_intent": "Delete a file or a folder inside the allowed roots. A folder with content needs recursive=true, which deletes it and everything in it. An allowed root is never deleted. Requires full_access safety mode."
     },
     {
       "aliases": [

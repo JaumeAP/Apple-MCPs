@@ -14,7 +14,7 @@ async def messages_list_attachments(
 ) -> Any:
     """Messages List Attachments
 
-    Delegated Apple domain tool 'messages_list_attachments' exposed through Apple-Tools-MCP.
+    List Apple Messages attachments by chat or message.
 
     Example:
         await messages_list_attachments(client, chat_id='example_chat_id', message_id='example_message_id')

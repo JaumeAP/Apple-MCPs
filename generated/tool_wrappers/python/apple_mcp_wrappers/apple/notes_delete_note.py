@@ -11,7 +11,7 @@ async def notes_delete_note(
 ) -> Any:
     """Notes Delete Note
 
-    Delegated Apple domain tool 'notes_delete_note' exposed through Apple-Tools-MCP.
+    Delete a note by note_id.
 
     Example:
         await notes_delete_note(client, note_id='example_note_id')

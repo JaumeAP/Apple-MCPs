@@ -13,7 +13,7 @@ async def messages_list_conversations(
 ) -> Any:
     """Messages List Conversations
 
-    Delegated Apple domain tool 'messages_list_conversations' exposed through Apple-Tools-MCP.
+    List recent Apple Messages conversations.
 
     Example:
         await messages_list_conversations(client, limit=1, offset=1)

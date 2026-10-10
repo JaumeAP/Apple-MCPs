@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from apple_system_mcp.models import AppRecord
 from apple_system_mcp.system_bridge import SystemBridge, SystemBridgeError
 
@@ -213,17 +215,26 @@ def test_gui_target_not_frontmost_maps_to_distinct_error(monkeypatch) -> None:
     assert error.value.error_code == "GUI_TARGET_NOT_FRONTMOST"
 
 
-def test_open_application_refuses_paths_and_launches_by_bundle_id(monkeypatch) -> None:
+def test_open_application_refuses_paths_and_launches_only_trusted_bundles(monkeypatch) -> None:
     import pytest
 
     bridge = SystemBridge()
     runs: list[tuple[str, ...]] = []
     helper_calls: list[tuple[str, ...]] = []
     monkeypatch.setattr(bridge, "_run", lambda *command, input_text=None: runs.append(command) or "")
+    installed = {
+        "Safari": "/System/Volumes/Preboot/Cryptexes/App/System/Applications/Safari.app",
+        "com.apple.TextEdit": "/System/Applications/TextEdit.app",
+        "SubtitleSync": "/Users/x/projects/subtitle-sync/build/SubtitleSync.app",
+        "com.evil.app": "/Users/x/Downloads/Evil.app",
+        "Sneaky": "/Applications/../Users/x/Downloads/Evil.app",
+    }
 
     def fake_helper(*args):
         helper_calls.append(args)
-        return {"name": "Safari", "bundle_id": "com.apple.Safari", "process_id": 7}
+        if args[0] in {"installed-name", "installed-bundle-id"}:
+            return {"name": args[1], "bundle_id": "com.example.app", "path": installed[args[1]]}
+        return {"name": "App", "bundle_id": "com.example.app", "process_id": 7}
 
     monkeypatch.setattr(bridge, "_run_apps_helper", fake_helper)
 
@@ -235,9 +246,16 @@ def test_open_application_refuses_paths_and_launches_by_bundle_id(monkeypatch) -
         bridge.open_application(bundle_id="/Applications/Evil.app")
     assert runs == [] and helper_calls == []
 
-    assert bridge.open_application(application="Safari").bundle_id == "com.apple.Safari"
-    assert helper_calls[0] == ("installed-name", "Safari")
-    assert runs == [("open", "-b", "com.apple.Safari")]
+    # Launch Services finds registered bundles anywhere on disk: only trusted folders launch.
+    for kwargs in ({"application": "SubtitleSync"}, {"bundle_id": "com.evil.app"}, {"application": "Sneaky"}):
+        with pytest.raises(SystemBridgeError) as error:
+            bridge.open_application(**kwargs)
+        assert error.value.error_code == "APPLICATION_NOT_TRUSTED"
+    assert runs == []
+
+    bridge.open_application(application="Safari")
+    bridge.open_application(bundle_id="com.apple.TextEdit")
+    assert runs == [("open", "-a", installed["Safari"]), ("open", "-a", installed["com.apple.TextEdit"])]
 
 
 def hashed_binary(bridge):
@@ -317,8 +335,6 @@ def test_running_apps_rejects_invalid_helper_output(monkeypatch, tmp_path) -> No
 
 
 def test_apps_helper_compiles_once_to_hashed_name(monkeypatch, tmp_path) -> None:
-    import os
-
     from apple_system_mcp import system_bridge
 
     source = tmp_path / "system_apps_bridge.swift"
@@ -331,10 +347,13 @@ def test_apps_helper_compiles_once_to_hashed_name(monkeypatch, tmp_path) -> None
     second = bridge._ensure_apps_helper()
 
     expected = hashed_binary(bridge)
-    temporary = expected.with_name(f"{expected.name}.{os.getpid()}.tmp")
     assert first == second == expected
-    assert expected.exists() and not temporary.exists()
-    assert compiles == [["swiftc", "-O", str(source), "-o", str(temporary)]]
+    assert expected.exists()
+    assert len(compiles) == 1 and compiles[0][:4] == ["swiftc", "-O", str(source), "-o"]
+    # A per-call temporary name, so threads of one process never collide, and none is left behind.
+    temporary = Path(compiles[0][4])
+    assert temporary.parent == expected.parent and temporary.name.startswith(f"{expected.name}.") and temporary.suffix == ".tmp"
+    assert not temporary.exists()
 
 
 def test_apps_helper_reuses_existing_hashed_binary(monkeypatch, tmp_path) -> None:

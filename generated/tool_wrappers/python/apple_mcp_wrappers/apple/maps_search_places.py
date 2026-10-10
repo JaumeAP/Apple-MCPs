@@ -12,7 +12,7 @@ async def maps_search_places(
 ) -> Any:
     """Maps Search Places
 
-    Delegated Apple domain tool 'maps_search_places' exposed through Apple-Tools-MCP.
+    Search Apple Maps for matching places.
 
     Example:
         await maps_search_places(client, query='find apple', limit=1)

@@ -11,7 +11,7 @@ async def system_set_dock_show_recents(
 ) -> Any:
     """System Set Dock Show Recents
 
-    Delegated Apple domain tool 'system_set_dock_show_recents' exposed through Apple-Tools-MCP.
+    Enable or disable recent applications in the Dock.
 
     Example:
         await system_set_dock_show_recents(client, enabled=False)

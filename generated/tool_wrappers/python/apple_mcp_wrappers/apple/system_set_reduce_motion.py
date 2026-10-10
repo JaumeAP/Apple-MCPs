@@ -11,7 +11,7 @@ async def system_set_reduce_motion(
 ) -> Any:
     """System Set Reduce Motion
 
-    Delegated Apple domain tool 'system_set_reduce_motion' exposed through Apple-Tools-MCP.
+    Enable or disable macOS reduce motion accessibility mode.
 
     Example:
         await system_set_reduce_motion(client, enabled=False)

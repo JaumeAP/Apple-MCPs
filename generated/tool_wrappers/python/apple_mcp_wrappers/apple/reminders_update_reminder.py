@@ -20,7 +20,7 @@ async def reminders_update_reminder(
 ) -> Any:
     """Reminders Update Reminder
 
-    Delegated Apple domain tool 'reminders_update_reminder' exposed through Apple-Tools-MCP.
+    Update one or more fields on an existing reminder. An empty list_id leaves the list unchanged; an empty notes clears the notes.
 
     Example:
         await reminders_update_reminder(client, reminder_id='example_reminder_id', title='example_title')

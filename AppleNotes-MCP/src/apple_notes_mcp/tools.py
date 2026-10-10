@@ -93,6 +93,17 @@ def _within_allowlist(notes: list) -> list:
     ]
 
 
+def _folders_within_allowlist(folders: list) -> list:
+    # Blocked folders' names and ids must not leak through listings either.
+    settings = load_settings()
+    return [
+        folder
+        for folder in folders
+        if (not settings.allowed_accounts or folder.account_name in settings.allowed_accounts)
+        and (not settings.allowed_folders or folder.name in settings.allowed_folders)
+    ]
+
+
 @mcp.resource(
     "notes://folders",
     name="notes_folders_snapshot",
@@ -102,7 +113,7 @@ def _within_allowlist(notes: list) -> list:
     annotations=Annotations(audience=["assistant"], priority=0.9),
 )
 def notes_folders_resource() -> str:
-    folders = _bridge().list_folders()
+    folders = _folders_within_allowlist(_bridge().list_folders())
     return _resource_json({"folders": [item.model_dump() for item in folders], "count": len(folders)})
 
 
@@ -242,7 +253,7 @@ def notes_list_folders(account_name: str | None = None, limit: int | str = 100, 
         limit_value = _coerce_int_arg("limit", limit, minimum=1)
         offset_value = _coerce_int_arg("offset", offset, minimum=0)
         ensure_action_allowed("notes_list_folders", account_name)
-        folders = _bridge().list_folders(account_name=account_name)
+        folders = _folders_within_allowlist(_bridge().list_folders(account_name=account_name))
         page = folders[offset_value : offset_value + limit_value]
         return FolderListResponse(folders=page, count=len(page))
     except SafetyError as exc:
@@ -447,8 +458,13 @@ def notes_create_folder(folder_name: str, account_name: str, parent_folder_id: s
     try:
         if not folder_name.strip():
             raise ValueError("folder_name must not be empty")
-        ensure_action_allowed("notes_create_folder", account_name, None)
-        folder = _bridge().create_folder(folder_name=folder_name.strip(), account_name=account_name, parent_folder_id=parent_folder_id)
+        # Check the parent too: a folder created inside a blocked one would
+        # open that subtree to the name-based checks.
+        parent = _folder_info(parent_folder_id or None)
+        if parent is not None:
+            ensure_action_allowed("notes_create_folder", parent.account_name, parent.name)
+        ensure_action_allowed("notes_create_folder", account_name, folder_name.strip())
+        folder = _bridge().create_folder(folder_name=folder_name.strip(), account_name=account_name, parent_folder_id=parent_folder_id or None)
         return FolderMutationResponse(folder=folder)
     except SafetyError as exc:
         return _error_response(exc.error_code, exc.message, exc.suggestion)

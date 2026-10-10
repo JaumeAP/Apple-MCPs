@@ -6,6 +6,48 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 ## [Unreleased]
 
+## [1.0.5-jap.18] - 2026-10-10 (JaumeAP fork)
+
+Fixes from a `/code-review max` of 1.0.5-jap.12.
+
+### Security
+
+- Notes: `list_folders` reads parent folders again (its handler ran outside the
+  Notes `tell`, so every `parent_folder_id` was null and deleting an allowed
+  folder also deleted blocked subfolders). `create_folder` checks the parent
+  and the new name; `list_folders` and `notes://folders` hide blocked folders.
+  The attachment check looks the note up by id and fails closed.
+- Contacts: a complete email or phone with no exact owner is not found; it no
+  longer resolves to another person's address that contains it. A number
+  without its country code still matches. A phone or email with an empty value
+  is refused, so it cannot replace every method.
+- Reminders, Calendar: ids are trimmed exactly as the Swift helper trims them
+  (including U+200B), and creating a reminder in an unresolved list fails
+  closed. Unscoped `list_reminders` and `reminders://today` query each allowed
+  list and cap after merging.
+- System: `open_application` launches only bundles in `/Applications`,
+  `~/Applications` or the system application folders, by their exact path.
+  `system_health` lists the GUI input tools only when the allow-list is set.
+  The frontmost check does not route keystrokes: they go to whatever holds
+  keyboard focus (documented).
+- Files: `open` refuses `.class`, `.jnlp`, `.term`, scripts whatever their
+  execute bit, and every executable file whatever its type.
+- Apple-Tools: re-exported tools keep their source annotations (destructive
+  hints); `apple_control_frontmost_app` is destructive.
+
+### Fixed
+
+- Calendar, Reminders: an empty notes or location clears it again; an empty
+  `calendar_id` means every calendar or no move.
+- Calendar: occurrence ids use the original occurrence date, so they survive a
+  moved occurrence; a missed occurrence id no longer falls back to automation.
+  A failed or stalled helper compile is not retried in the same process, and a
+  compile timeout no longer falls back to an automation write.
+- Contacts, System: helper compiles use unique temp names, and install errors
+  are structured; Calendar and Maps map install errors too. Contacts no longer
+  suggests a blind retry after a timeout.
+- Shortcuts: iCloud Drive is reachable when a custom root covers it.
+
 ## [1.0.5-jap.17] - 2026-10-10 (JaumeAP fork)
 
 ### Added
@@ -64,7 +106,7 @@ Fixes from a `/code-review max` of the security-audit changes.
   `APPLE_SYSTEM_MCP_GUI_ALLOWED_APPS` (empty by default), always refuse
   terminals and script-capable apps (Script Editor, Automator, Shortcuts,
   code editors), and stop with `GUI_TARGET_NOT_FRONTMOST` unless the target
-  is frontmost; input is sent to the target process. `open_application`
+  is frontmost (keystrokes still go to the focused app; see 1.0.5-jap.13). `open_application`
   refuses paths and launches by bundle id. Apple-Tools marks the GUI tools
   destructive.
 - Notes: renaming or retagging a note with attachments is refused; the
@@ -87,7 +129,8 @@ Fixes from a `/code-review max` of the security-audit changes.
 - Calendar: recurring events get occurrence ids (`<id>@<start>`), and update
   and delete target that occurrence.
 - Contacts: a complete email or phone resolves to its exact owner and returns
-  the queried value; updates report `unchanged_fields`.
+  the queried value (without an exact owner it fell back to a containing
+  address until 1.0.5-jap.13); updates report `unchanged_fields`.
 - Calendar, Reminders, Maps: helper compiles use unique temp names; a timeout
   on a change no longer advises a blind retry; empty notes or location mean
   no change; a compile timeout falls back to JXA.

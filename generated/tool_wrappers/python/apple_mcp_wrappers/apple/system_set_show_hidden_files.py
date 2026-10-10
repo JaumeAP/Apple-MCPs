@@ -11,7 +11,7 @@ async def system_set_show_hidden_files(
 ) -> Any:
     """System Set Show Hidden Files
 
-    Delegated Apple domain tool 'system_set_show_hidden_files' exposed through Apple-Tools-MCP.
+    Show or hide hidden files in Finder.
 
     Example:
         await system_set_show_hidden_files(client, enabled=False)

@@ -580,6 +580,17 @@ def test_gui_input_tools_keep_destructive_annotations_and_source_descriptions() 
         assert "terminals" in tool.description
 
 
+def test_reexported_tools_keep_every_source_annotation() -> None:
+    # The re-exported tool must warn exactly as its source server does.
+    for name in ("notes_update_note", "notes_append_to_note", "notes_delete_folder", "contacts_delete_contact"):
+        assert tools.mcp._tool_manager.get_tool(name).annotations.destructive_hint is True, name
+    # A source function re-exported as is keeps its description too.
+    assert "rewrites the whole body" in tools.mcp._tool_manager.get_tool("notes_update_note").description
+    control = tools.mcp._tool_manager.get_tool("apple_control_frontmost_app")
+    assert control.annotations.destructive_hint is True
+    assert "APPLE_SYSTEM_MCP_GUI_ALLOWED_APPS" in control.description
+
+
 def test_apple_control_frontmost_app_dispatches(monkeypatch) -> None:
     monkeypatch.setattr(
         tools,

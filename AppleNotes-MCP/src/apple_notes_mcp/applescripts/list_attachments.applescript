@@ -1,25 +1,19 @@
 on run argv
 	set targetNoteId to item 1 of argv
-		set jsonItems to {}
+	set jsonItems to {}
 	tell application "Notes"
-		repeat with acc in accounts
-			set accName to my safe_text(name of acc)
-			set accId to my safe_text(id of acc)
-			repeat with fld in folders of acc
-				set fldId to my safe_text(id of fld)
-				set fldName to my safe_text(name of fld)
-				repeat with n in notes of fld
-					if my safe_text(id of n) is targetNoteId then
-						repeat with a in attachments of n
-								set end of jsonItems to "{" & quote & "name" & quote & ":" & my json_string(my safe_text(name of a)) & "}"
-							end repeat
-							return "{" & quote & "items" & quote & ":[" & my join_list(jsonItems, ",") & "]}"
-					end if
-				end repeat
-			end repeat
-		end repeat
+		-- Look the note up by id in one Apple Event: a positional walk races with
+		-- concurrent reorders and could read another note's attachments.
+		try
+			set attachmentNames to name of every attachment of note id targetNoteId
+		on error
+			return "{" & quote & "found" & quote & ":false}"
+		end try
 	end tell
-	return "{" & quote & "items" & quote & ":[]}"
+	repeat with attachmentName in attachmentNames
+		set end of jsonItems to "{" & quote & "name" & quote & ":" & my json_string(my safe_text(contents of attachmentName)) & "}"
+	end repeat
+	return "{" & quote & "found" & quote & ":true," & quote & "items" & quote & ":[" & my join_list(jsonItems, ",") & "]}"
 end run
 
 on safe_text(valueText)

@@ -19,7 +19,9 @@ from .files_remove_tags import files_remove_tags
 from .files_list_recent_locations import files_list_recent_locations
 from .files_get_icloud_status import files_get_icloud_status
 from .files_create_folder import files_create_folder
+from .files_create_file import files_create_file
 from .files_move_path import files_move_path
+from .files_copy_path import files_copy_path
 from .files_delete_path import files_delete_path
 from .files_list_prompts import files_list_prompts
 from .files_get_prompt import files_get_prompt
@@ -42,7 +44,9 @@ __all__ = [
     "files_list_recent_locations",
     "files_get_icloud_status",
     "files_create_folder",
+    "files_create_file",
     "files_move_path",
+    "files_copy_path",
     "files_delete_path",
     "files_list_prompts",
     "files_get_prompt",

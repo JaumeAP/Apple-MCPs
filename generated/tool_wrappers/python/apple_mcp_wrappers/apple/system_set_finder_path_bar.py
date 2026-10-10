@@ -11,7 +11,7 @@ async def system_set_finder_path_bar(
 ) -> Any:
     """System Set Finder Path Bar
 
-    Delegated Apple domain tool 'system_set_finder_path_bar' exposed through Apple-Tools-MCP.
+    Show or hide the Finder path bar.
 
     Example:
         await system_set_finder_path_bar(client, enabled=False)

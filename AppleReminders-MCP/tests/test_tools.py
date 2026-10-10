@@ -216,6 +216,45 @@ def test_unscoped_listings_and_padded_ids_respect_allowlist(monkeypatch) -> None
     assert padded.error.error_code == "LIST_BLOCKED"
 
 
+def test_create_reminder_refuses_id_that_swift_trims_into_a_blocked_list(monkeypatch) -> None:
+    # Swift trims U+200B and str.strip() does not: the check must see the helper's id.
+    monkeypatch.setenv("APPLE_REMINDERS_MCP_SAFETY_MODE", "safe_manage")
+    monkeypatch.setenv("APPLE_REMINDERS_MCP_ALLOWED_LISTS", "Chores")
+    load_settings.cache_clear()
+    monkeypatch.setattr(tools, "_bridge", lambda: TwoListBridge())
+
+    padded = tools.reminders_create_reminder(title="x", list_id=chr(0x200B) + "list-2")
+    unknown = tools.reminders_create_reminder(title="x", list_id="no-such-list")
+
+    assert padded.ok is False and padded.error.error_code == "LIST_BLOCKED"
+    assert unknown.ok is False and unknown.error.error_code == "LIST_NOT_FOUND"
+
+
+class CappedBridge(TwoListBridge):
+    """Applies list_id and limit like the helper: blocked reminders sort first."""
+
+    def list_reminders(self, list_id=None, limit=100, **kwargs):
+        chores = self.get_reminder("x-apple-reminder://chores").model_copy(update={"due_date": "2026-12-01T09:00:00Z"})
+        private = [
+            chores.model_copy(update={"reminder_id": f"x-apple-reminder://p{index}", "list_id": "list-2", "list_name": "Private", "due_date": "2026-01-01T09:00:00Z"})
+            for index in range(3)
+        ]
+        items = [item for item in [*private, chores] if list_id is None or item.list_id == list_id]
+        return items[:limit]
+
+
+def test_unscoped_list_reminders_caps_after_the_allowlist(monkeypatch) -> None:
+    monkeypatch.setenv("APPLE_REMINDERS_MCP_ALLOWED_LISTS", "Chores")
+    load_settings.cache_clear()
+    monkeypatch.setattr(tools, "_bridge", lambda: CappedBridge())
+
+    result = tools.reminders_list_reminders(limit=2)
+    today = json.loads(tools.reminders_today_resource())
+
+    assert [item.list_name for item in result.reminders] == ["Chores"]
+    assert [item["list_name"] for item in today["reminders"]] == ["Chores"]
+
+
 def test_update_reminder_treats_empty_list_id_as_no_move(monkeypatch) -> None:
     monkeypatch.setenv("APPLE_REMINDERS_MCP_SAFETY_MODE", "safe_manage")
     load_settings.cache_clear()

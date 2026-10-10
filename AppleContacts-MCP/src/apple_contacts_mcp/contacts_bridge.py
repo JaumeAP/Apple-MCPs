@@ -7,12 +7,14 @@ import re
 import subprocess
 import tempfile
 import time
+import uuid
 from collections.abc import Iterator
 from contextlib import suppress
 from pathlib import Path
 
 from apple_contacts_mcp.config import load_settings
 from apple_contacts_mcp.models import ContactDetail, ContactMethod, ContactSummary, CreateContactResponse, DeleteContactResponse, DuplicateCandidateGroup, DuplicateEvidence, ResolvedRecipientResponse
+from apple_mcp_common.runtime import swift_trim
 
 METHOD_FIELD_SEPARATOR = "\x1f"
 METHOD_RECORD_SEPARATOR = "\x1e"
@@ -105,9 +107,10 @@ class AppleContactsBridge:
         if channel not in {"phone", "email", "any"}:
             raise ContactsBridgeError("INVALID_INPUT", f"Unsupported channel '{channel}'.", "Use 'phone', 'email', or 'any'.")
         # A complete address or number names one method: only contacts holding that
-        # exact value count, so a partial match on another contact is no ambiguity.
+        # exact value count, so a partial match on another contact is no ambiguity,
+        # and no exact owner means not found, never a containing address.
         matches = self._exact_method_matches(query)
-        if not matches:
+        if matches is None:
             # Two results are enough to prove ambiguity: a message must never go to a
             # contact picked from several matches.
             matches = self.search_contacts(query, limit=2)
@@ -320,24 +323,36 @@ class AppleContactsBridge:
             "Use a different contact.",
         )
 
-    def _exact_method_matches(self, query: str) -> list[ContactSummary]:
+    def _exact_method_matches(self, query: str) -> list[ContactSummary] | None:
         """Contacts holding a phone or email equal to a complete address or number.
 
-        Returns [] for name queries and partial values, which keep the
+        Returns None for name queries and partial values, which keep the
         any-two-matches-is-ambiguous rule of search_contacts.
         """
         query_text = query.strip()
         parts = self._phone_query_parts(query_text)
         is_email = re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", query_text) is not None
         if not is_email and (parts is None or len(parts[0]) < 7):
-            return []
+            return None
         normalized_query = self._normalize_lookup_value(query_text)
         # ponytail: full directory scan per resolve, like the search_contacts method scan.
         return [
             contact
             for contact in self._iter_all_contacts()
-            if any(self._normalize_lookup_value(method.value) == normalized_query for method in (contact.emails if is_email else contact.phones))
+            if any(
+                self._normalize_lookup_value(method.value) == normalized_query if is_email else self._same_phone(query_text, method.value)
+                for method in (contact.emails if is_email else contact.phones)
+            )
         ]
+
+    def _same_phone(self, query: str, value: str) -> bool:
+        """The same number and extension, allowing a missing country code (up to 3 digits)."""
+        query_parts = self._phone_query_parts(query)
+        value_parts = self._phone_query_parts(value)
+        if query_parts is None or value_parts is None or query_parts[1] != value_parts[1]:
+            return False
+        shorter, longer = sorted((query_parts[0], value_parts[0]), key=len)
+        return shorter == longer or (len(shorter) >= 7 and longer.endswith(shorter) and len(longer) - len(shorter) <= 3)
 
     def _queried_method(self, contact: ContactDetail, channel: str, query: str) -> tuple[str, ContactMethod] | None:
         """The method a phone or email query names, so the message goes to that value."""
@@ -351,7 +366,7 @@ class AppleContactsBridge:
             for method in methods
         ]
         for kind, method in candidates:
-            if self._normalize_lookup_value(method.value) == normalized_query:
+            if self._normalize_lookup_value(method.value) == normalized_query or (kind == "phone" and self._same_phone(query, method.value)):
                 return kind, method
         partial: dict[str, tuple[str, ContactMethod]] = {}
         for kind, method in candidates:
@@ -435,7 +450,7 @@ class AppleContactsBridge:
                         raise ContactsBridgeError(
                             "APPLESCRIPT_TIMEOUT",
                             f"The Contacts helper exceeded the {SCRIPT_TIMEOUT_SECONDS}-second timeout.",
-                            "Check for a pending Contacts permission prompt and try again.",
+                            "Check for a pending Contacts permission prompt. A create, update or delete may already have been applied: check the contact before retrying it.",
                         )
                     if stdout_file.tell() > MAX_SCRIPT_OUTPUT_BYTES or stderr_file.tell() > MAX_SCRIPT_OUTPUT_BYTES:
                         self._stop_process(process)
@@ -495,7 +510,7 @@ class AppleContactsBridge:
         """Return the compiled helper for the current source, compiling it if needed.
 
         The binary name carries a hash of the source, so an existing binary is always
-        current. Compilation writes to a per-process temporary file and renames it into
+        current. Compilation writes to a per-call temporary file and renames it into
         place, so concurrent servers never run a half-written binary.
         """
         try:
@@ -511,9 +526,13 @@ class AppleContactsBridge:
         if binary.exists():
             return binary
 
-        binary.parent.mkdir(parents=True, exist_ok=True)
-        temporary = binary.with_name(f"{binary.name}.{os.getpid()}.tmp")
+        # A per-call name: the pid is shared by every thread of this server.
+        temporary = binary.with_name(f"{binary.name}.{uuid.uuid4().hex}.tmp")
         try:
+            try:
+                binary.parent.mkdir(parents=True, exist_ok=True)
+            except OSError as exc:
+                raise ContactsBridgeError("HELPER_INSTALL_FAILED", f"Could not create the helper directory: {exc}.", "Retry the request.") from exc
             try:
                 completed = subprocess.run(
                     ["swiftc", "-O", str(self.helper_source), "-o", str(temporary)],
@@ -540,7 +559,10 @@ class AppleContactsBridge:
                     completed.stderr.strip() or completed.stdout.strip() or "Failed to compile the native helper.",
                     "Confirm Xcode command line tools and Swift are available, then retry.",
                 )
-            os.replace(temporary, binary)
+            try:
+                os.replace(temporary, binary)
+            except OSError as exc:
+                raise ContactsBridgeError("HELPER_INSTALL_FAILED", f"Could not install the compiled native helper: {exc}.", "Retry the request.") from exc
         finally:
             temporary.unlink(missing_ok=True)
         return binary
@@ -704,6 +726,9 @@ class AppleContactsBridge:
             return ""
         rows: list[str] = []
         for method in methods:
+            # A blank value would replace the whole method set with one empty entry.
+            if not swift_trim(method.value):
+                raise ContactsBridgeError("INVALID_INPUT", "A phone or email value must not be empty.", "Omit the array to keep the current phones or emails, or give every entry a value.")
             label = method.label.replace(METHOD_FIELD_SEPARATOR, " ").replace(METHOD_RECORD_SEPARATOR, " ")
             value = method.value.replace(METHOD_FIELD_SEPARATOR, " ").replace(METHOD_RECORD_SEPARATOR, " ")
             rows.append(f"{label}{METHOD_FIELD_SEPARATOR}{value}")

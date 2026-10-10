@@ -224,6 +224,10 @@ class AppleNotesBridge:
 
     def list_attachments(self, note_id: str) -> list[AttachmentInfo]:
         payload = self._run_script("list_attachments.applescript", note_id)
+        # Fail closed: an unresolved id must never read as "no attachments",
+        # because the attachment guard would then let `set body` drop them.
+        if not payload.get("found", True):
+            raise NotesBridgeError("NOTE_NOT_FOUND", f"No note matched '{note_id}'.", "List notes first to discover valid ids.")
         return [AttachmentInfo.model_validate(item) for item in payload.get("items", []) if isinstance(item, dict)]
 
     def search_notes(

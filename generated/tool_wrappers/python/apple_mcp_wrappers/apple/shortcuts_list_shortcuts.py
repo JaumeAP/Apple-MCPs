@@ -11,7 +11,7 @@ async def shortcuts_list_shortcuts(
 ) -> Any:
     """Shortcuts List Shortcuts
 
-    Delegated Apple domain tool 'shortcuts_list_shortcuts' exposed through Apple-Tools-MCP.
+    List Apple Shortcuts, optionally restricted to one folder.
 
     Example:
         await shortcuts_list_shortcuts(client, folder_name='example_folder_name')
