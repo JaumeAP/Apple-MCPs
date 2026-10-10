@@ -28,7 +28,7 @@ from apple_mcp_common.runtime import notify_resources_changed, require_loopback_
 SERVER_INSTRUCTIONS = (
     "Use this server for file and folder access on macOS. "
     "Search here when the user wants to inspect Downloads, Desktop, Documents, iCloud Drive, or other allowed folders, "
-    "read a text file, prepare an attachment, create a folder, move a file, open or reveal a path, manage Finder tags, or delete a path."
+    "read a text file, prepare an attachment, create a folder or a file, move or copy a file or folder, open or reveal a path, manage Finder tags, or delete a path."
 )
 
 mcp = MCPServer("Apple Files MCP", instructions=SERVER_INSTRUCTIONS, version=load_settings().version)
@@ -142,7 +142,7 @@ def files_health() -> HealthResponse:
         "prompts",
     ]
     if settings.safety_mode in {"safe_manage", "full_access"}:
-        capabilities.extend(["create_folder", "move_path", "copy_path", "open_path", "reveal_in_finder", "set_tags", "add_tags", "remove_tags"])
+        capabilities.extend(["create_folder", "create_file", "move_path", "copy_path", "open_path", "reveal_in_finder", "set_tags", "add_tags", "remove_tags"])
     if settings.safety_mode == "full_access":
         capabilities.append("delete_path")
     return HealthResponse(
@@ -405,6 +405,27 @@ async def files_create_folder(path: str, ctx: Context) -> FileMutationResponse |
 
 
 @mcp.tool(
+    title="Create File",
+    description=(
+        "Create a new file inside the allowed roots. Pass text for UTF-8 content or content_base64 for binary content, "
+        "exactly one of them. The parent folder must exist and the path must not. Never overwrites."
+    ),
+    annotations=ToolAnnotations(destructive_hint=False, idempotent_hint=False, open_world_hint=False),
+    structured_output=True,
+)
+async def files_create_file(
+    path: str, ctx: Context, text: str | None = None, content_base64: str | None = None
+) -> FileMutationResponse | ErrorResponse:
+    try:
+        ensure_action_allowed("files_create_file")
+        created = _bridge().create_file(path, text=text, content_base64=content_base64)
+        await notify_resources_changed(ctx)
+        return FileMutationResponse(path=created, action="created")
+    except (SafetyError, FilesBridgeError, OSError) as exc:
+        return _exception_response(exc)
+
+
+@mcp.tool(
     title="Move Path",
     description="Move or rename a file or folder inside the allowed roots.",
     annotations=ToolAnnotations(destructive_hint=False, idempotent_hint=False, open_world_hint=False),
@@ -422,7 +443,10 @@ async def files_move_path(source: str, destination: str, ctx: Context) -> FileMu
 
 @mcp.tool(
     title="Copy Path",
-    description="Copy a file, byte for byte, to a new path inside the allowed roots. Never overwrites.",
+    description=(
+        "Copy a file, byte for byte, or a whole folder with everything in it to a new path inside the allowed roots. "
+        "The destination must not exist; nothing is overwritten."
+    ),
     annotations=ToolAnnotations(destructive_hint=False, idempotent_hint=False, open_world_hint=False),
     structured_output=True,
 )
@@ -438,14 +462,17 @@ async def files_copy_path(source: str, destination: str, ctx: Context) -> FileMu
 
 @mcp.tool(
     title="Delete Path",
-    description="Delete a file or empty folder inside the allowed roots. Requires full_access safety mode.",
+    description=(
+        "Delete a file or a folder inside the allowed roots. A folder with content needs recursive=true, which deletes "
+        "it and everything in it. An allowed root is never deleted. Requires full_access safety mode."
+    ),
     annotations=ToolAnnotations(destructive_hint=True, idempotent_hint=True, open_world_hint=False),
     structured_output=True,
 )
-async def files_delete_path(path: str, ctx: Context) -> FileMutationResponse | ErrorResponse:
+async def files_delete_path(path: str, ctx: Context, recursive: bool = False) -> FileMutationResponse | ErrorResponse:
     try:
         ensure_action_allowed("files_delete_path")
-        deleted = _bridge().delete_path(path)
+        deleted = _bridge().delete_path(path, recursive=recursive)
         await notify_resources_changed(ctx)
         return FileMutationResponse(path=deleted, action="deleted")
     except (SafetyError, FilesBridgeError, OSError) as exc:

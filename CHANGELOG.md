@@ -6,6 +6,24 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 ## [Unreleased]
 
+## [1.0.5-jap.17] - 2026-10-10 (JaumeAP fork)
+
+### Added
+
+- Files: `files_create_file` creates a new file from `text` (UTF-8) or
+  `content_base64` (binary), up to 10 MB. It never overwrites, needs an existing
+  parent folder, and needs `safe_manage` or `full_access`.
+- Files: `files_copy_path` copies a whole folder tree. The destination must not
+  exist, links inside the tree are copied as links, and a folder cannot be
+  copied into itself.
+- Files: `files_delete_path` takes `recursive` to delete a folder that has
+  content, and everything in it.
+
+### Changed
+
+- Files: `files_delete_path` refuses to delete an allowed root, or a folder that
+  contains one.
+
 ## [1.0.5-jap.16] - 2026-10-10 (JaumeAP fork)
 
 ### Changed

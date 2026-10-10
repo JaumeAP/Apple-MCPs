@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import heapq
 import mimetypes
 import os
@@ -31,6 +33,7 @@ def _iso_timestamp(timestamp: float | None) -> str | None:
 class FilesBridge:
     _ICLOUD_SUFFIX = Path("Library/Mobile Documents/com~apple~CloudDocs")
     _MAX_READ_BYTES = 1_000_000
+    _MAX_WRITE_BYTES = 10_000_000
     # Executables, installers and documents that redirect `open` to another target.
     _UNSAFE_OPEN_SUFFIXES = frozenset(
         {
@@ -387,11 +390,42 @@ class FilesBridge:
         source_path.rename(destination_path)
         return str(source_path), str(destination_path)
 
+    def create_file(self, path: str, text: str | None = None, content_base64: str | None = None) -> str:
+        if (text is None) == (content_base64 is None):
+            raise FilesBridgeError("INVALID_INPUT", "Pass exactly one of text or content_base64.", "Use text for UTF-8 content, content_base64 for binary content.")
+        if content_base64 is not None:
+            try:
+                payload = base64.b64decode(content_base64, validate=True)
+            except (binascii.Error, ValueError) as exc:
+                raise FilesBridgeError("INVALID_INPUT", "content_base64 is not valid base64.", "Send standard base64 without line breaks.") from exc
+        else:
+            payload = (text or "").encode("utf-8")
+        if len(payload) > self._MAX_WRITE_BYTES:
+            raise FilesBridgeError("TOO_LARGE", f"Content is {len(payload)} bytes; the limit is {self._MAX_WRITE_BYTES}.", "Create the file in smaller parts or copy it instead.")
+        destination = self._ensure_allowed(path, allow_missing=True)
+        # Exclusive create: an existing file or folder is never overwritten.
+        try:
+            with destination.open("xb") as handle:
+                handle.write(payload)
+        except FileExistsError as exc:
+            raise FilesBridgeError(
+                "DESTINATION_EXISTS",
+                f"Destination already exists: {destination}",
+                "Choose a path that does not exist yet.",
+            ) from exc
+        except OSError:
+            # Only reachable after the exclusive create succeeded, so the partial file is ours.
+            destination.unlink(missing_ok=True)
+            raise
+        return str(destination)
+
     def copy_path(self, source: str, destination: str) -> tuple[str, str]:
         source_path = self._ensure_allowed(source)
         destination_path = self._ensure_allowed(destination, allow_missing=True)
+        if source_path.is_dir():
+            return self._copy_folder(source_path, destination_path)
         if not source_path.is_file():
-            raise FilesBridgeError("NOT_A_FILE", f"Not a regular file: {source_path}", "Copy files one by one; folders are not copied.")
+            raise FilesBridgeError("NOT_A_FILE", f"Not a regular file or folder: {source_path}", "Choose a file or a folder path.")
         # Exclusive create: an existing destination is never overwritten.
         try:
             with source_path.open("rb") as reader, destination_path.open("xb") as writer:
@@ -405,12 +439,44 @@ class FilesBridge:
         shutil.copystat(source_path, destination_path)
         return str(source_path), str(destination_path)
 
-    def delete_path(self, path: str) -> str:
+    def _copy_folder(self, source_path: Path, destination_path: Path) -> tuple[str, str]:
+        if os.path.lexists(destination_path):
+            raise FilesBridgeError(
+                "DESTINATION_EXISTS",
+                f"Destination already exists: {destination_path}",
+                "Choose a destination path that does not exist yet.",
+            )
+        if destination_path.is_relative_to(source_path):
+            raise FilesBridgeError(
+                "DESTINATION_INSIDE_SOURCE",
+                f"Cannot copy a folder into itself: {source_path} -> {destination_path}",
+                "Choose a destination outside the source folder.",
+            )
+        # Links inside the tree are copied as links, never followed, so nothing outside the roots is read.
+        shutil.copytree(source_path, destination_path, symlinks=True)
+        return str(source_path), str(destination_path)
+
+    def delete_path(self, path: str, recursive: bool = False) -> str:
         target = self._ensure_allowed(path)
+        # An allowed root, or a folder holding one, is never deleted: the server would lose its own scope.
+        if any(root.is_relative_to(target) for root in self.allowed_roots):
+            raise FilesBridgeError(
+                "ROOT_PROTECTED",
+                f"Refusing to delete an allowed root or a folder that contains one: {target}",
+                "Delete something inside the root instead.",
+            )
         if target.is_dir():
             if any(target.iterdir()):
-                raise FilesBridgeError("DIRECTORY_NOT_EMPTY", f"Directory is not empty: {target}", "Move or delete the contents first.")
-            target.rmdir()
+                if not recursive:
+                    raise FilesBridgeError(
+                        "DIRECTORY_NOT_EMPTY",
+                        f"Directory is not empty: {target}",
+                        "Move or delete the contents first, or pass recursive=true to delete the folder and everything in it.",
+                    )
+                # Links inside the tree are removed as links, never followed.
+                shutil.rmtree(target)
+            else:
+                target.rmdir()
         else:
             target.unlink()
         return str(target)
