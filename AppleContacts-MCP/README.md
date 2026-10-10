@@ -115,7 +115,7 @@ Xcode command line tools must be installed.
 - Optional backups: set `APPLE_CONTACTS_MCP_BACKUP_DIR` to save each contact as a `.vcf` file in that
   directory before `contacts_update_contact` or `contacts_delete_contact` changes it. Backup files are
   owner-only (0600) and a new backup directory is created 0700. If macOS refuses the vCard export,
-  a partial `.json` backup is kept instead.
+  an update keeps a partial `.json` backup instead, and a delete is refused with no change made.
 
 ## macOS Permissions
 
