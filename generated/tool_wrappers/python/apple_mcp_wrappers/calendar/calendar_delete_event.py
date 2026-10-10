@@ -11,7 +11,7 @@ async def calendar_delete_event(
 ) -> Any:
     """Delete Event
 
-    Delete a calendar event by event_id.
+    Delete a calendar event by event_id. With native Calendar access, a recurring event is deleted for this occurrence only, not the rest of the series; the automation fallback may delete the whole series.
 
     Example:
         await calendar_delete_event(client, event_id='example_event_id')

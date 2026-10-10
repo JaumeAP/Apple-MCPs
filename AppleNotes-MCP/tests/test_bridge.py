@@ -257,13 +257,16 @@ def test_create_note_recovers_note_after_create_timeout(monkeypatch) -> None:
     bridge._folder_by_id = lambda folder_id: None  # type: ignore[method-assign]
     monkeypatch.setattr(bridge, "list_attachments", lambda note_id: [])
 
+    # date_to_epoch is local wall-clock seconds since 1970.
+    local_now = int(time.time()) + time.localtime().tm_gmtoff
+
     def fake_run_script(script_name: str, *args: str) -> dict[str, object]:
         if script_name == "create_note.applescript":
             raise NotesBridgeError("APPLESCRIPT_TIMEOUT", "timed out")
         if script_name == "list_notes.applescript":
-            return {"items": [_note_payload("note-9", "Disposable title", created_epoch=int(time.time()))]}
+            return {"items": [_note_payload("note-9", "Disposable title", created_epoch=local_now)]}
         if script_name == "get_note.applescript":
-            return {"found": True, "note": _note_payload("note-9", "Disposable title", created_epoch=int(time.time()))}
+            return {"found": True, "note": _note_payload("note-9", "Disposable title", created_epoch=local_now)}
         raise AssertionError(f"Unexpected script: {script_name}")
 
     monkeypatch.setattr(bridge, "_run_script", fake_run_script)
@@ -316,6 +319,26 @@ def test_create_note_recovery_ignores_stale_same_title_note(monkeypatch) -> None
         assert exc.error_code == "NOTE_CREATE_STATUS_UNKNOWN"
     else:
         raise AssertionError("Expected NotesBridgeError")
+
+
+def test_create_note_recovery_ignores_same_title_note_with_unknown_date(monkeypatch) -> None:
+    # An epoch of 0 means the creation date is unknown: the note may be a
+    # pre-existing one, so recovery must not adopt (and later overwrite) it.
+    bridge = AppleNotesBridge(Path("/tmp/scripts"))
+    bridge._folder_by_id = lambda folder_id: None  # type: ignore[method-assign]
+
+    def fake_run_script(script_name: str, *args: str) -> dict[str, object]:
+        if script_name == "create_note.applescript":
+            raise NotesBridgeError("APPLESCRIPT_TIMEOUT", "timed out")
+        if script_name == "list_notes.applescript":
+            return {"items": [_note_payload("note-old", "Disposable title", created_epoch=0)]}
+        raise AssertionError(f"Unexpected script: {script_name}")
+
+    monkeypatch.setattr(bridge, "_run_script", fake_run_script)
+
+    with pytest.raises(NotesBridgeError) as excinfo:
+        bridge.create_note(title="Disposable title", folder_id="folder-1", body_html="<p>new</p>")
+    assert excinfo.value.error_code == "NOTE_CREATE_STATUS_UNKNOWN"
 
 
 def test_create_note_reports_note_id_when_post_create_update_fails(monkeypatch) -> None:

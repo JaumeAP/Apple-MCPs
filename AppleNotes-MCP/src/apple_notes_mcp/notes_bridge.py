@@ -23,7 +23,9 @@ class NotesBridgeError(Exception):
 class AppleNotesBridge:
     # After a create-script timeout, a same-title note only counts as the one
     # we just made when its creation date is at most this old (or unknown).
-    _CREATE_RECOVERY_FRESHNESS_SECONDS = 600
+    # Whole-second AppleScript epochs and clock rounding: tolerate this much
+    # before the create call started when deciding a note is the new one.
+    _CREATE_RECOVERY_SLACK_SECONDS = 2
 
     def __init__(self, scripts_dir: Path, script_timeout_seconds: int = 60) -> None:
         self.scripts_dir = scripts_dir
@@ -79,6 +81,7 @@ class AppleNotesBridge:
         tags: list[str] | None = None,
     ) -> NoteDetail:
         prepared_body_html = self._prepare_body_html(title, body_html) if body_html is not None else None
+        create_started = time.time()
         try:
             payload = self._run_script(
                 "create_note.applescript",
@@ -93,7 +96,7 @@ class AppleNotesBridge:
             # Notes can commit `make new note` and then stall in the readback,
             # so a timeout leaves the create ambiguous. Creation is not
             # idempotent: resolve the outcome instead of making callers guess.
-            detail = self._recover_created_note(title, folder_id)
+            detail = self._recover_created_note(title, folder_id, create_started)
             if detail is None:
                 raise NotesBridgeError(
                     "NOTE_CREATE_STATUS_UNKNOWN",
@@ -235,10 +238,12 @@ class AppleNotesBridge:
         matched.sort(key=lambda item: item.modified_epoch or 0, reverse=True)
         return matched[: max(1, min(limit, 100))]
 
-    def _recover_created_note(self, title: str, folder_id: str) -> NoteDetail | None:
+    def _recover_created_note(self, title: str, folder_id: str, create_started: float) -> NoteDetail | None:
         # Only claim recovery when exactly one note in the target folder has
-        # the exact title and is fresh enough (or has no creation date) to be
-        # the one just created — a lone stale match is a pre-existing note.
+        # the exact title and a known creation time no earlier than the create
+        # call. A stale match, or one with an unknown date (epoch 0), may be a
+        # pre-existing note; adopting it would let the follow-up update
+        # overwrite the user's content.
         try:
             candidates = [note for note in self.list_notes(folder_id=folder_id) if note.title == title]
         except NotesBridgeError:
@@ -247,7 +252,12 @@ class AppleNotesBridge:
             return None
         candidate = candidates[0]
         created_epoch = candidate.created_epoch or 0
-        if created_epoch and created_epoch < time.time() - self._CREATE_RECOVERY_FRESHNESS_SECONDS:
+        if created_epoch <= 0:
+            return None
+        # date_to_epoch counts from local midnight 1970-01-01, so it runs
+        # ahead of UTC by the local offset; convert before comparing.
+        created_utc = created_epoch - time.localtime(create_started).tm_gmtoff
+        if created_utc < create_started - self._CREATE_RECOVERY_SLACK_SECONDS:
             return None
         try:
             return self.get_note(candidate.note_id)

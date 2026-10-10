@@ -502,6 +502,8 @@ struct ApplePIMBridge {
                 suggestion: "List calendar events first to discover valid ids."
             )
         }
+        // No tool exposes a series option: `.thisEvent` never touches other
+        // occurrences of a recurring event.
         try store.remove(event, span: .thisEvent, commit: true)
         return BooleanMutationPayload(deleted: true, object_id: eventID)
     }
@@ -678,9 +680,12 @@ struct ApplePIMBridge {
         case .pending: status = "pending"
         default: status = "unknown"
         }
+        // `url` is imported as non-optional, but EventKit can return nil for
+        // some attendees; reading it directly would trap. Read it via KVC.
+        let url = participant.value(forKey: "URL") as? URL
         return AttendeeInfo(
             name: participant.name,
-            email: participant.url.absoluteString.replacingOccurrences(of: "mailto:", with: ""),
+            email: url?.absoluteString.replacingOccurrences(of: "mailto:", with: ""),
             status: status
         )
     }

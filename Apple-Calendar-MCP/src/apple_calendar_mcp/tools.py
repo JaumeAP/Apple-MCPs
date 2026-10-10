@@ -346,7 +346,7 @@ def calendar_create_event(
 
 @mcp.tool(
     title="Update Event",
-    description="Update one or more fields on an existing calendar event.",
+    description="Update one or more fields on an existing calendar event. With native Calendar access, a recurring event is changed for this occurrence only, not the rest of the series; the automation fallback may act on the whole series.",
     annotations=ToolAnnotations(destructive_hint=False, idempotent_hint=False, open_world_hint=False),
     structured_output=True,
 )
@@ -388,7 +388,7 @@ def calendar_update_event(
 
 @mcp.tool(
     title="Delete Event",
-    description="Delete a calendar event by event_id.",
+    description="Delete a calendar event by event_id. With native Calendar access, a recurring event is deleted for this occurrence only, not the rest of the series; the automation fallback may delete the whole series.",
     annotations=ToolAnnotations(destructive_hint=True, idempotent_hint=False, open_world_hint=False),
     structured_output=True,
 )
