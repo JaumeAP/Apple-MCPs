@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import uuid
 from pathlib import Path
 
 from apple_reminders_mcp.config import load_settings
@@ -13,6 +14,9 @@ from apple_reminders_mcp.models import (
     ReminderListMutationResponse,
     ReminderSummary,
 )
+
+# Helper commands that change Reminders data: a timeout leaves their outcome unknown.
+_MUTATING_COMMAND_PREFIXES = ("create-", "update-", "set-", "delete-")
 
 
 class RemindersBridgeError(Exception):
@@ -115,6 +119,10 @@ class RemindersBridge:
         parent_reminder_id: str | None = None,
         tags: list[str] | None = None,
     ) -> ReminderDetail:
+        # The helper reads an empty string as "clear", so '' would silently erase
+        # the notes. Treat it as "no change", like every other omitted field.
+        if notes is not None and not notes.strip():
+            notes = None
         request: dict[str, object] = {}
         if title is not None:
             request["title"] = title
@@ -171,9 +179,16 @@ class RemindersBridge:
                 timeout=self._HELPER_TIMEOUT_SECONDS,
             )
         except subprocess.TimeoutExpired as exc:
+            message = f"Native helper '{command}' did not finish within {self._HELPER_TIMEOUT_SECONDS} seconds."
+            if command.startswith(_MUTATING_COMMAND_PREFIXES):
+                raise RemindersBridgeError(
+                    "HELPER_TIMEOUT",
+                    f"{message} The change may or may not have been applied.",
+                    "List or get the reminder or list to check its current state before retrying.",
+                ) from exc
             raise RemindersBridgeError(
                 "HELPER_TIMEOUT",
-                f"Native helper '{command}' did not finish within {self._HELPER_TIMEOUT_SECONDS} seconds.",
+                message,
                 "Check that Reminders and iCloud sync are responsive, then retry.",
             ) from exc
         except OSError as exc:
@@ -219,7 +234,8 @@ class RemindersBridge:
         self.helper_binary.parent.mkdir(parents=True, exist_ok=True)
         # Compile next to the target and swap it in atomically, so a concurrent
         # caller never runs a half-written binary.
-        temporary_binary = self.helper_binary.with_name(f"{self.helper_binary.name}.{os.getpid()}.tmp")
+        # A per-call name: the pid is shared by every thread of this server.
+        temporary_binary = self.helper_binary.with_name(f"{self.helper_binary.name}.{uuid.uuid4().hex}.tmp")
         try:
             completed = subprocess.run(
                 ["swiftc", "-parse-as-library", "-O", str(self.helper_source), "-o", str(temporary_binary)],
@@ -243,7 +259,15 @@ class RemindersBridge:
                 "This server requires macOS with the Swift toolchain (swiftc) available.",
             ) from exc
         if completed.returncode == 0:
-            os.replace(temporary_binary, self.helper_binary)
+            try:
+                os.replace(temporary_binary, self.helper_binary)
+            except OSError as exc:
+                temporary_binary.unlink(missing_ok=True)
+                raise RemindersBridgeError(
+                    "HELPER_COMPILE_FAILED",
+                    f"Could not install the compiled native helper: {exc}.",
+                    "Retry the request.",
+                ) from exc
         else:
             temporary_binary.unlink(missing_ok=True)
             raise RemindersBridgeError(

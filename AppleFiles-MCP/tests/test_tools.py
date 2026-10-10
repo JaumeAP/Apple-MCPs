@@ -109,6 +109,18 @@ def test_files_read_text_file(monkeypatch):
     assert result.text == "hello"
 
 
+def test_files_tool_maps_os_error(monkeypatch):
+    class DeniedBridge(StubBridge):
+        def read_text_file(self, path: str, max_bytes: int = 100_000):
+            raise PermissionError(13, "Permission denied", path)
+
+    monkeypatch.setattr(tools, "_bridge", lambda: DeniedBridge())
+    result = tools.files_read_text_file("/Users/test/Downloads/a.txt")
+    assert result.ok is False
+    assert result.error.error_code == "FILE_SYSTEM_ERROR"
+    assert "Permission denied" in result.error.message
+
+
 def test_files_search_files(monkeypatch):
     monkeypatch.setattr(tools, "_bridge", lambda: StubBridge())
     result = tools.files_search_files("a")

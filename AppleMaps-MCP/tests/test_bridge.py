@@ -44,3 +44,27 @@ def test_ensure_helper_compiles_to_temp_file_and_replaces_atomically(monkeypatch
     assert binary.read_text() == "compiled"
     assert sorted(p.name for p in binary.parent.iterdir()) == ["apple-maps-bridge"]
     assert calls[0][1]["timeout"] == bridge.timeout_seconds
+
+
+def test_overlapping_compiles_use_distinct_temp_files(monkeypatch, tmp_path) -> None:
+    source = tmp_path / "apple_maps_bridge.swift"
+    source.write_text("// swift")
+    binary = tmp_path / "bin" / "apple-maps-bridge"
+    bridge = AppleMapsBridge(source, binary)
+    outputs = []
+
+    def fake_run(cmd, **kwargs):
+        output = Path(cmd[cmd.index("-o") + 1])
+        outputs.append(output)
+        output.write_text("compiled")
+        if len(outputs) == 1:
+            # A second thread compiles and installs while this compile is still running.
+            bridge._ensure_helper()
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    bridge._ensure_helper()
+
+    assert outputs[0] != outputs[1]
+    assert binary.read_text() == "compiled"

@@ -96,6 +96,46 @@ def test_open_path_refuses_executables_and_uses_separator(monkeypatch, tmp_path)
     assert calls == [["open", "--", str(document.resolve())]]
 
 
+def test_open_path_location_docs_executable_documents_and_unreadable(monkeypatch, tmp_path) -> None:
+    calls: list[list[str]] = []
+
+    def fake_run(command, capture_output, check, text, timeout):
+        calls.append(command)
+
+        class Completed:
+            stdout = ""
+
+        return Completed()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    bridge = FilesBridge((tmp_path,))
+    for name in ("app.jar", "server.afploc", "share.smbloc", "host.vncloc", "site.ftploc"):
+        (tmp_path / name).write_text("x")
+        with pytest.raises(FilesBridgeError) as excinfo:
+            bridge.open_path(str(tmp_path / name))
+        assert excinfo.value.error_code == "UNSAFE_OPEN_TARGET"
+    script = tmp_path / "job.py"
+    script.write_text("print(1)")
+    script.chmod(0o755)
+    with pytest.raises(FilesBridgeError):
+        bridge.open_path(str(script))
+    # A photo copied from exFAT keeps -rwxrwxrwx and must still open.
+    photo = tmp_path / "photo.jpg"
+    photo.write_bytes(b"\xff\xd8\xff")
+    photo.chmod(0o777)
+    bridge.open_path(str(photo))
+    assert calls == [["open", "--", str(photo.resolve())]]
+    locked = tmp_path / "locked.pdf"
+    locked.write_bytes(b"%PDF")
+    locked.chmod(0o000)
+    try:
+        with pytest.raises(FilesBridgeError) as excinfo:
+            bridge.open_path(str(locked))
+        assert excinfo.value.error_code == "READ_FAILED"
+    finally:
+        locked.chmod(0o644)
+
+
 def test_read_text_file_bounds_read_and_rejects_non_regular(tmp_path) -> None:
     text_file = tmp_path / "a.txt"
     text_file.write_text("abcdef")

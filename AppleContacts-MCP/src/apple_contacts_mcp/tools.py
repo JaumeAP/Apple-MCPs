@@ -315,7 +315,8 @@ def contacts_update_contact(
             emails=emails,
             note=note,
         )
-        return ContactResponse(contact=contact)
+        fields = {"first_name": first_name, "last_name": last_name, "organization": organization, "phones": phones, "emails": emails, "note": note}
+        return ContactResponse(contact=contact, unchanged_fields=[name for name, value in fields.items() if not value])
     except SafetyError as exc:
         return _error_response(exc.error_code, exc.message, exc.suggestion)
     except ContactsBridgeError as exc:

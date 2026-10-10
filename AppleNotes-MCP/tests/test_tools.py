@@ -1,6 +1,9 @@
+import pytest
+
 from apple_notes_mcp import tools
 from apple_notes_mcp.config import load_settings
 from apple_notes_mcp.models import AccountInfo, FolderInfo, NoteCapabilities, NoteDetail
+from apple_notes_mcp.permissions import SafetyError
 
 
 class FakeBridge:
@@ -177,6 +180,76 @@ def test_delete_folder_fails_closed(monkeypatch) -> None:
     load_settings.cache_clear()
     assert tools.notes_delete_folder(folder_id="folder-missing").error.error_code == "FOLDER_NOT_FOUND"
     assert tools.notes_delete_folder(folder_id="folder-1").deleted is True
+
+
+class NestedFoldersBridge(FakeBridge):
+    # "Personal" (folder-1, holds note-1) and "Work" (folder-2) at the top;
+    # "Secret" (folder-3) nested inside "Work".
+    def list_folders(self, account_name: str | None = None):
+        def folder(folder_id: str, name: str, parent: str | None = None) -> FolderInfo:
+            return FolderInfo(folder_id=folder_id, name=name, account_id="acc-1", account_name="iCloud", parent_folder_id=parent, parent_folder_name=None, shared=False)
+
+        return [folder("folder-1", "Personal"), folder("folder-2", "Work"), folder("folder-3", "Secret", parent="folder-2")]
+
+
+def _allow_only_work(monkeypatch) -> None:
+    monkeypatch.setenv("APPLE_NOTES_MCP_SAFETY_MODE", "full_access")
+    monkeypatch.setenv("APPLE_NOTES_MCP_ALLOWED_FOLDERS", "Work")
+    load_settings.cache_clear()
+    monkeypatch.setattr(tools, "_bridge", lambda: NestedFoldersBridge())
+
+
+def test_note_resource_honors_folder_allowlist(monkeypatch) -> None:
+    # notes://note/{note_id} returned any note, bypassing the allowlist.
+    _allow_only_work(monkeypatch)
+
+    with pytest.raises(SafetyError):
+        tools.notes_note_resource("note-1")
+
+
+def test_move_and_update_check_the_source_folder(monkeypatch) -> None:
+    # Only the destination was checked, so a note could be pulled out of a
+    # blocked folder into an allowed one.
+    _allow_only_work(monkeypatch)
+
+    assert tools.notes_move_note(note_id="note-1", folder_id="folder-2").error.error_code == "FOLDER_BLOCKED"
+    assert tools.notes_update_note(note_id="note-1", folder_id="folder-2").error.error_code == "FOLDER_BLOCKED"
+
+
+def test_delete_folder_checks_nested_subfolders(monkeypatch) -> None:
+    # Notes deletes nested subfolders with their parent.
+    _allow_only_work(monkeypatch)
+
+    assert tools.notes_delete_folder(folder_id="folder-2").error.error_code == "FOLDER_BLOCKED"
+
+
+def test_empty_folder_id_means_no_folder(monkeypatch) -> None:
+    # Models send "" for unused optional strings; it must not be FOLDER_NOT_FOUND.
+    monkeypatch.setenv("APPLE_NOTES_MCP_SAFETY_MODE", "full_access")
+    load_settings.cache_clear()
+    monkeypatch.setattr(tools, "_bridge", lambda: FakeBridge())
+
+    assert tools.notes_list_notes(folder_id="").ok is True
+    assert tools.notes_update_note(note_id="note-1", title="Trip", folder_id="").ok is True
+
+
+def test_search_notes_filters_allowlist_before_capping(monkeypatch) -> None:
+    # The bridge capped at 100 first, so 100 blocked matches hid allowed ones.
+    _allow_only_work(monkeypatch)
+    seen: dict[str, object] = {}
+
+    def search_notes(*, query, account_name=None, folder_id=None, limit=25):
+        seen["limit"] = limit
+        blocked = FakeBridge().list_notes()[0]
+        allowed = blocked.model_copy(update={"note_id": "note-work", "folder_id": "folder-2", "folder_name": "Work"})
+        return [blocked] * 150 + [allowed]
+
+    monkeypatch.setattr(NestedFoldersBridge, "search_notes", staticmethod(search_notes), raising=False)
+
+    result = tools.notes_search_notes(query="trip")
+
+    assert seen["limit"] is None
+    assert [note.note_id for note in result.notes] == ["note-work"]
 
 
 def teardown_function() -> None:

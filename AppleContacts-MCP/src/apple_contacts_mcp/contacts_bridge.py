@@ -104,16 +104,20 @@ class AppleContactsBridge:
     def resolve_message_recipient(self, query: str, channel: str = "phone") -> ResolvedRecipientResponse:
         if channel not in {"phone", "email", "any"}:
             raise ContactsBridgeError("INVALID_INPUT", f"Unsupported channel '{channel}'.", "Use 'phone', 'email', or 'any'.")
-        # Two results are enough to prove ambiguity: a message must never go to a
-        # contact picked from several matches.
-        matches = self.search_contacts(query, limit=2)
+        # A complete address or number names one method: only contacts holding that
+        # exact value count, so a partial match on another contact is no ambiguity.
+        matches = self._exact_method_matches(query)
+        if not matches:
+            # Two results are enough to prove ambiguity: a message must never go to a
+            # contact picked from several matches.
+            matches = self.search_contacts(query, limit=2)
         if not matches:
             raise ContactsBridgeError("CONTACT_NOT_FOUND", f"No contact matched '{query}'.", "Search contacts first to discover a valid contact.")
         if len(matches) > 1:
             raise ContactsBridgeError(
                 "AMBIGUOUS_CONTACT",
                 f"Multiple contacts matched '{query}'.",
-                "Use contacts_search_contacts first, then choose a specific contact_id.",
+                "Use contacts_search_contacts to find the intended person, then resolve again with that person's exact email address or phone number as the query.",
             )
 
         detail = self.get_contact(matches[0].contact_id)
@@ -288,6 +292,8 @@ class AppleContactsBridge:
                 "NO_PHONE_NUMBER_MATCH", "No phone method matches the requested extension.",
                 "Choose a matching phone method explicitly.",
             )
+        if query is not None and (queried := self._queried_method(contact, channel, query)) is not None:
+            return queried
         if channel == "phone":
             if contact.phones:
                 return "phone", contact.phones[0]
@@ -313,6 +319,52 @@ class AppleContactsBridge:
             f"Contact '{contact.name}' does not have a phone number or email address.",
             "Use a different contact.",
         )
+
+    def _exact_method_matches(self, query: str) -> list[ContactSummary]:
+        """Contacts holding a phone or email equal to a complete address or number.
+
+        Returns [] for name queries and partial values, which keep the
+        any-two-matches-is-ambiguous rule of search_contacts.
+        """
+        query_text = query.strip()
+        parts = self._phone_query_parts(query_text)
+        is_email = re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", query_text) is not None
+        if not is_email and (parts is None or len(parts[0]) < 7):
+            return []
+        normalized_query = self._normalize_lookup_value(query_text)
+        # ponytail: full directory scan per resolve, like the search_contacts method scan.
+        return [
+            contact
+            for contact in self._iter_all_contacts()
+            if any(self._normalize_lookup_value(method.value) == normalized_query for method in (contact.emails if is_email else contact.phones))
+        ]
+
+    def _queried_method(self, contact: ContactDetail, channel: str, query: str) -> tuple[str, ContactMethod] | None:
+        """The method a phone or email query names, so the message goes to that value."""
+        if "@" not in query and self._phone_query_parts(query) is None:
+            return None
+        normalized_query = self._normalize_lookup_value(query)
+        candidates = [
+            (kind, method)
+            for kind, methods in (("phone", contact.phones), ("email", contact.emails))
+            if channel in {kind, "any"}
+            for method in methods
+        ]
+        for kind, method in candidates:
+            if self._normalize_lookup_value(method.value) == normalized_query:
+                return kind, method
+        partial: dict[str, tuple[str, ContactMethod]] = {}
+        for kind, method in candidates:
+            normalized_value = self._normalize_lookup_value(method.value)
+            if normalized_query and normalized_query in normalized_value:
+                partial.setdefault(normalized_value, (kind, method))
+        if len(partial) > 1:
+            raise ContactsBridgeError(
+                "AMBIGUOUS_CONTACT_METHOD",
+                f"Several methods of '{contact.name}' match '{query}'.",
+                "Pass the complete email address or phone number as the query.",
+            )
+        return next(iter(partial.values()), None)
 
     def _iter_all_contacts(self) -> Iterator[ContactSummary]:
         offset = 0

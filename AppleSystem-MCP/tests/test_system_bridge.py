@@ -106,7 +106,7 @@ def test_read_preference_domain_rejects_paths_and_options(monkeypatch) -> None:
     monkeypatch.setattr(system_bridge.subprocess, "run", fake_run)
     bridge = SystemBridge()
 
-    for domain in ("/etc/hosts", "~/Library/Preferences/com.apple.dock", "../secret", ".hidden", "-currentHost", "com.apple/../x", "nodots"):
+    for domain in ("/etc/hosts", "~/Library/Preferences/com.apple.dock", "../secret", ".hidden", "-currentHost", "com.apple/../x", "_x", "9lives"):
         with pytest.raises(SystemBridgeError) as error:
             bridge.read_preference_domain(domain)
         assert error.value.error_code == "INVALID_INPUT"
@@ -114,7 +114,130 @@ def test_read_preference_domain_rejects_paths_and_options(monkeypatch) -> None:
 
     assert bridge.read_preference_domain("com.apple.dock") == {}
     assert bridge.read_preference_domain("-g") == {}
-    assert commands == [["defaults", "export", "com.apple.dock", "-"], ["defaults", "export", "NSGlobalDomain", "-"]]
+    assert bridge.read_preference_domain("loginwindow") == {}
+    assert commands == [
+        ["defaults", "export", "com.apple.dock", "-"],
+        ["defaults", "export", "NSGlobalDomain", "-"],
+        ["defaults", "export", "loginwindow", "-"],
+    ]
+
+
+def allow_gui_apps(monkeypatch, value: str) -> None:
+    from apple_system_mcp.config import load_settings
+
+    monkeypatch.setenv("APPLE_SYSTEM_MCP_GUI_ALLOWED_APPS", value)
+    load_settings.cache_clear()
+
+
+def test_gui_input_requires_allow_listed_non_script_target(monkeypatch) -> None:
+    import pytest
+
+    from apple_system_mcp.config import load_settings
+
+    bridge = SystemBridge()
+    captured: list[tuple[str, ...]] = []
+    monkeypatch.setattr(bridge, "_run", lambda *command: captured.append(command) or "")
+    resolved = {"app": AppRecord(name="TextEdit", bundle_id="com.apple.TextEdit", process_id=1)}
+    monkeypatch.setattr(bridge, "_target_application", lambda application=None, bundle_id=None: resolved["app"])
+
+    try:
+        # Default: empty allow-list refuses every target.
+        allow_gui_apps(monkeypatch, "")
+        with pytest.raises(SystemBridgeError) as error:
+            bridge.gui_type_text("hello", application="TextEdit")
+        assert error.value.error_code == "GUI_TARGET_NOT_ALLOWED"
+
+        # A script-capable app stays refused even when allow-listed.
+        allow_gui_apps(monkeypatch, "com.apple.ScriptEditor2, com.microsoft.VSCode")
+        for record in (AppRecord(name="Script Editor", bundle_id="com.apple.ScriptEditor2", process_id=2), AppRecord(name="Electron", bundle_id="com.microsoft.VSCode", process_id=3)):
+            resolved["app"] = record
+            with pytest.raises(SystemBridgeError) as error:
+                bridge.gui_press_keys("r", modifiers=["command"], bundle_id=record.bundle_id)
+            assert error.value.error_code == "TERMINAL_TARGET_REFUSED"
+        assert captured == []
+
+        allow_gui_apps(monkeypatch, "com.apple.textedit")
+        resolved["app"] = AppRecord(name="TextEdit", bundle_id="com.apple.TextEdit", process_id=1)
+        bridge.gui_type_text("hello", application="TextEdit")
+        assert captured[0][-3:] == ("TextEdit", "hello", "com.apple.TextEdit")
+    finally:
+        load_settings.cache_clear()
+
+
+def test_gui_input_scripts_verify_frontmost_bundle_before_input(monkeypatch) -> None:
+    from apple_system_mcp.config import load_settings
+
+    bridge = SystemBridge()
+    captured: list[tuple[str, ...]] = []
+    monkeypatch.setattr(bridge, "_run", lambda *command: captured.append(command) or "")
+    monkeypatch.setattr(
+        bridge,
+        "_target_application",
+        lambda application=None, bundle_id=None: AppRecord(name="TextEdit", bundle_id="com.apple.TextEdit", process_id=1),
+    )
+    try:
+        allow_gui_apps(monkeypatch, "com.apple.TextEdit")
+        bridge.gui_type_text("hello", application="TextEdit")
+        bridge.gui_press_keys("return", application="TextEdit")
+        bridge.gui_click_button(label="OK", application="TextEdit")
+        bridge.gui_choose_popup_value(label="Size", value="12", application="TextEdit")
+        bridge.gui_click_menu_path(["File", "New"], application="TextEdit")
+    finally:
+        load_settings.cache_clear()
+
+    assert len(captured) == 5
+    for command in captured:
+        script = [command[index + 1] for index, part in enumerate(command[: command.index("--")]) if part == "-e"]
+        guard = script.index('if frontBundle is not targetBundle then error "GUI_TARGET_NOT_FRONTMOST"')
+        target = script.index("tell (first application process whose bundle identifier is targetBundle)")
+        assert "tell application id targetBundle to activate" in script
+        assert not any("appName to activate" in line for line in script)
+        assert guard < target
+        assert not any(("keystroke" in line or "key code" in line or "click" in line) for line in script[:guard])
+        assert command[-1] == "com.apple.TextEdit"
+
+
+def test_gui_target_not_frontmost_maps_to_distinct_error(monkeypatch) -> None:
+    import subprocess
+
+    import pytest
+
+    from apple_system_mcp import system_bridge
+
+    def fake_run(command, **kwargs):
+        raise subprocess.CalledProcessError(1, command, "", "execution error: GUI_TARGET_NOT_FRONTMOST (-2700)")
+
+    monkeypatch.setattr(system_bridge.subprocess, "run", fake_run)
+    with pytest.raises(SystemBridgeError) as error:
+        SystemBridge()._run_osascript(["return 1"])
+    assert error.value.error_code == "GUI_TARGET_NOT_FRONTMOST"
+
+
+def test_open_application_refuses_paths_and_launches_by_bundle_id(monkeypatch) -> None:
+    import pytest
+
+    bridge = SystemBridge()
+    runs: list[tuple[str, ...]] = []
+    helper_calls: list[tuple[str, ...]] = []
+    monkeypatch.setattr(bridge, "_run", lambda *command, input_text=None: runs.append(command) or "")
+
+    def fake_helper(*args):
+        helper_calls.append(args)
+        return {"name": "Safari", "bundle_id": "com.apple.Safari", "process_id": 7}
+
+    monkeypatch.setattr(bridge, "_run_apps_helper", fake_helper)
+
+    for application in ("/Users/x/Downloads/Evil.app", "~/Evil.app", "Evil.app", "../Evil"):
+        with pytest.raises(SystemBridgeError) as error:
+            bridge.open_application(application=application)
+        assert error.value.error_code == "INVALID_INPUT"
+    with pytest.raises(SystemBridgeError):
+        bridge.open_application(bundle_id="/Applications/Evil.app")
+    assert runs == [] and helper_calls == []
+
+    assert bridge.open_application(application="Safari").bundle_id == "com.apple.Safari"
+    assert helper_calls[0] == ("installed-name", "Safari")
+    assert runs == [("open", "-b", "com.apple.Safari")]
 
 
 def hashed_binary(bridge):

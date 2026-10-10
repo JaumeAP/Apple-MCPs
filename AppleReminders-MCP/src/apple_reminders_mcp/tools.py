@@ -89,6 +89,14 @@ def _list_title(list_id: str) -> str | None:
     return None
 
 
+def _clean_id(value: str | None) -> str | None:
+    # The Swift helper trims ids, so an untrimmed id would miss the exact-match
+    # allowlist lookups here yet still reach the list. An empty id means no id.
+    if value is None:
+        return None
+    return value.strip() or None
+
+
 def _list_visible(list_name: str) -> bool:
     allowed_lists = load_settings().allowed_lists
     return not allowed_lists or list_name in allowed_lists
@@ -201,7 +209,7 @@ async def reminders_recheck_permissions(ctx: Context) -> HealthResponse:
 def reminders_list_lists() -> ReminderListResponse | ErrorResponse:
     try:
         ensure_action_allowed("reminders_list_lists")
-        lists = _bridge().list_lists()
+        lists = [item for item in _bridge().list_lists() if _list_visible(item.title)]
         return ReminderListResponse(lists=lists, count=len(lists))
     except (SafetyError, RemindersBridgeError) as exc:
         return _error_response(exc.error_code, exc.message, exc.suggestion)
@@ -235,6 +243,7 @@ def reminders_delete_list(list_id: str) -> DeleteReminderListResponse | ErrorRes
     try:
         # Only ids that resolve to a reminder list are passed on, so the allowlist
         # applies and a calendar id can never reach the helper.
+        list_id = list_id.strip()
         list_title = _list_title(list_id)
         ensure_action_allowed("reminders_delete_list", list_title)
         if list_title is None:
@@ -262,21 +271,22 @@ def reminders_list_reminders(
 ) -> ReminderListItemsResponse | ErrorResponse:
     try:
         limit_value = _coerce_int_arg("limit", limit, minimum=1)
-        list_name = None
-        if list_id is not None:
-            for list_info in _bridge().list_lists():
-                if list_info.list_id == list_id:
-                    list_name = list_info.title
-                    break
+        list_id = _clean_id(list_id)
+        list_name = _list_title(list_id) if list_id is not None else None
         ensure_action_allowed("reminders_list_reminders", list_name)
-        reminders = _bridge().list_reminders(
-            list_id=list_id,
-            include_completed=include_completed,
-            limit=limit_value,
-            search=search,
-            due_after=due_after,
-            due_before=due_before,
-        )
+        # ponytail: filters after the helper's limit, so an allowlist can return fewer than `limit`.
+        reminders = [
+            item
+            for item in _bridge().list_reminders(
+                list_id=list_id,
+                include_completed=include_completed,
+                limit=limit_value,
+                search=search,
+                due_after=due_after,
+                due_before=due_before,
+            )
+            if _list_visible(item.list_name)
+        ]
         return ReminderListItemsResponse(reminders=reminders, count=len(reminders))
     except SafetyError as exc:
         return _error_response(exc.error_code, exc.message, exc.suggestion)
@@ -294,7 +304,7 @@ def reminders_list_reminders(
 )
 def reminders_get_reminder(reminder_id: str) -> ReminderResponse | ErrorResponse:
     try:
-        detail = _bridge().get_reminder(reminder_id)
+        detail = _bridge().get_reminder(reminder_id.strip())
         ensure_action_allowed("reminders_get_reminder", detail.list_name)
         return ReminderResponse(reminder=detail)
     except SafetyError as exc:
@@ -330,11 +340,8 @@ def reminders_create_reminder(
                 "Create a top-level reminder instead, or omit parent_reminder_id.",
             )
         priority_value = _coerce_int_arg("priority", priority, minimum=0)
-        list_title = None
-        for list_info in _bridge().list_lists():
-            if list_info.list_id == list_id:
-                list_title = list_info.title
-                break
+        list_id = list_id.strip()
+        list_title = _list_title(list_id)
         ensure_action_allowed("reminders_create_reminder", list_title)
         detail = _bridge().create_reminder(
             title=title.strip(),
@@ -358,7 +365,7 @@ def reminders_create_reminder(
 
 @mcp.tool(
     title="Update Reminder",
-    description="Update one or more fields on an existing reminder.",
+    description="Update one or more fields on an existing reminder. An empty list_id or notes leaves that field unchanged.",
     annotations=ToolAnnotations(destructive_hint=False, idempotent_hint=False, open_world_hint=False),
     structured_output=True,
 )
@@ -381,6 +388,9 @@ def reminders_update_reminder(
                 "Apple Reminders subtasks are not available through the public APIs used by this MCP.",
                 "Update the reminder without parent_reminder_id.",
             )
+        reminder_id = reminder_id.strip()
+        # An empty list_id means "do not move", not "move to a list called ''".
+        list_id = _clean_id(list_id)
         ensure_action_allowed("reminders_update_reminder", _reminder_owner_list(reminder_id))
         if list_id is not None:
             destination_title = _list_title(list_id)
@@ -419,6 +429,7 @@ def reminders_update_reminder(
 )
 def reminders_complete_reminder(reminder_id: str) -> ReminderResponse | ErrorResponse:
     try:
+        reminder_id = reminder_id.strip()
         ensure_action_allowed("reminders_complete_reminder", _reminder_owner_list(reminder_id))
         detail = _bridge().set_completed(reminder_id, True)
         return ReminderResponse(reminder=detail)
@@ -436,6 +447,7 @@ def reminders_complete_reminder(reminder_id: str) -> ReminderResponse | ErrorRes
 )
 def reminders_uncomplete_reminder(reminder_id: str) -> ReminderResponse | ErrorResponse:
     try:
+        reminder_id = reminder_id.strip()
         ensure_action_allowed("reminders_uncomplete_reminder", _reminder_owner_list(reminder_id))
         detail = _bridge().set_completed(reminder_id, False)
         return ReminderResponse(reminder=detail)
@@ -453,6 +465,7 @@ def reminders_uncomplete_reminder(reminder_id: str) -> ReminderResponse | ErrorR
 )
 def reminders_delete_reminder(reminder_id: str) -> DeleteReminderResponse | ErrorResponse:
     try:
+        reminder_id = reminder_id.strip()
         ensure_action_allowed("reminders_delete_reminder", _reminder_owner_list(reminder_id))
         deleted = _bridge().delete_reminder(reminder_id)
         return DeleteReminderResponse(deleted=deleted, reminder_id=reminder_id)

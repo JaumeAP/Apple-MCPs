@@ -201,5 +201,32 @@ def test_resources_hide_lists_outside_allowlist(monkeypatch) -> None:
     assert [item["list_name"] for item in today["reminders"]] == ["Chores"]
 
 
+def test_unscoped_listings_and_padded_ids_respect_allowlist(monkeypatch) -> None:
+    monkeypatch.setenv("APPLE_REMINDERS_MCP_ALLOWED_LISTS", "Chores")
+    load_settings.cache_clear()
+    monkeypatch.setattr(tools, "_bridge", lambda: TwoListBridge())
+
+    lists = tools.reminders_list_lists()
+    unscoped = tools.reminders_list_reminders()
+    padded = tools.reminders_list_reminders(list_id=" list-2 ")
+
+    assert [item.title for item in lists.lists] == ["Chores"]
+    assert [item.list_name for item in unscoped.reminders] == ["Chores"]
+    assert padded.ok is False
+    assert padded.error.error_code == "LIST_BLOCKED"
+
+
+def test_update_reminder_treats_empty_list_id_as_no_move(monkeypatch) -> None:
+    monkeypatch.setenv("APPLE_REMINDERS_MCP_SAFETY_MODE", "safe_manage")
+    load_settings.cache_clear()
+    bridge = TwoListBridge()
+    monkeypatch.setattr(tools, "_bridge", lambda: bridge)
+
+    result = tools.reminders_update_reminder("x-apple-reminder://chores", title="New", list_id="")
+
+    assert result.ok is True
+    assert bridge.updated[0]["list_id"] is None
+
+
 def teardown_function() -> None:
     load_settings.cache_clear()

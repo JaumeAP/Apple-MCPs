@@ -1,3 +1,6 @@
+import os
+from pathlib import Path
+
 from apple_shortcuts_mcp.shortcuts_bridge import ShortcutsBridge, ShortcutsBridgeError
 
 
@@ -20,9 +23,9 @@ def test_parse_shortcuts_and_folders(monkeypatch) -> None:
             )
         if key == ("list", "--folders"):
             return Completed(0, "Home\nCar\n")
-        if key == ("list", "--show-identifiers", "--folder-name", "Home"):
+        if key == ("list", "--show-identifiers", "--folder-name=Home"):
             return Completed(0, "Open Trunk (9A2D4AFE-D4B5-418E-814A-DB97BAB3BE4D)\n")
-        if key == ("list", "--show-identifiers", "--folder-name", "Car"):
+        if key == ("list", "--show-identifiers", "--folder-name=Car"):
             return Completed(0, "Start Car (29B15189-C4FC-4823-89AE-45617D461CBA)\n")
         raise AssertionError(f"Unexpected args: {args}")
 
@@ -128,3 +131,45 @@ def test_run_shortcut_confines_paths(monkeypatch, tmp_path) -> None:
     bridge.run_shortcut("-x", input_paths=[str(existing)], output_path=str(output))
     assert captured["args"][-2:] == ["--", "-x"]
     assert str(output.resolve()) in captured["args"]
+
+
+def test_option_values_cannot_become_options(monkeypatch) -> None:
+    bridge = ShortcutsBridge(shortcuts_command="shortcuts", timeout_seconds=5)
+    calls: list[list[str]] = []
+    monkeypatch.setattr(bridge, "_run_cli", lambda args, input_data=None: calls.append(args) or Completed(0, "", ""))
+    monkeypatch.setattr(
+        bridge,
+        "resolve_shortcut",
+        lambda value: __import__("apple_shortcuts_mcp.models", fromlist=["ShortcutInfo"]).ShortcutInfo(name=value),
+    )
+
+    bridge.list_shortcuts(folder_name="--folders")
+    bridge.run_shortcut("Open Trunk", output_type="--input-path")
+
+    assert calls[0] == ["list", "--show-identifiers", "--folder-name=--folders"]
+    assert calls[1] == ["run", "--output-type=--input-path", "--", "Open Trunk"]
+
+
+def test_library_rule_ignores_case_and_yields_to_library_roots(monkeypatch, tmp_path) -> None:
+    home = Path(os.path.realpath(tmp_path))
+    monkeypatch.setenv("HOME", str(home))
+    workflows = home / "Library" / "Mobile Documents" / "iCloud~is~workflow~my~workflows" / "Documents"
+    workflows.mkdir(parents=True)
+    (home / "Library" / "Keychains").mkdir()
+    bridge = ShortcutsBridge(shortcuts_command="shortcuts", timeout_seconds=5)
+    bridge.allowed_roots = (home, workflows)
+
+    for typed in ("~/LIBRARY/Keychains/login.keychain-db", "~/library/LaunchAgents/x.plist", "~/Library/Keychains/x"):
+        try:
+            bridge._confine_path(typed)
+        except ShortcutsBridgeError as exc:
+            assert exc.error_code == "PATH_NOT_ALLOWED"
+        else:
+            raise AssertionError(f"Expected refusal for {typed}")
+    assert bridge._confine_path(str(workflows / "in.txt")) == str(workflows / "in.txt")
+    try:
+        bridge._confine_path(str(workflows / ".secret"))
+    except ShortcutsBridgeError as exc:
+        assert exc.error_code == "PATH_NOT_ALLOWED"
+    else:
+        raise AssertionError("Expected refusal for a hidden segment under a Library root")

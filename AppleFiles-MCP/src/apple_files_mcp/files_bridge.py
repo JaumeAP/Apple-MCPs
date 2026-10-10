@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import heapq
+import mimetypes
 import os
 import plistlib
 import stat
@@ -34,8 +35,13 @@ class FilesBridge:
         {
             ".app", ".command", ".tool", ".terminal", ".sh", ".workflow", ".action",
             ".scpt", ".scptd", ".applescript", ".pkg", ".mpkg", ".prefpane", ".shortcut",
-            ".webloc", ".fileloc", ".inetloc", ".url",
+            ".webloc", ".fileloc", ".inetloc", ".url", ".jar", ".afploc", ".atloc", ".ftploc",
+            ".mailloc", ".newsloc", ".nfsloc", ".smbloc", ".vncloc",
         }
+    )
+    # Scripts that a default handler may run; the execute bit counts only for these and unknown types.
+    _SCRIPT_SUFFIXES = frozenset(
+        {".py", ".pl", ".rb", ".zsh", ".bash", ".csh", ".tcsh", ".ksh", ".php", ".js", ".tcl", ".lua"}
     )
 
     def __init__(self, allowed_roots: tuple[Path, ...]) -> None:
@@ -278,9 +284,15 @@ class FilesBridge:
                 "Use files_reveal_in_finder and open it yourself if you trust it.",
             )
         if target.is_file():
-            with target.open("rb") as handle:
-                is_alias = handle.read(12) == b"book\0\0\0\0mark"
-            if is_alias or os.access(target, os.X_OK):
+            try:
+                with target.open("rb") as handle:
+                    is_alias = handle.read(12) == b"book\0\0\0\0mark"
+            except OSError as exc:
+                raise FilesBridgeError("READ_FAILED", f"Could not read {target}: {exc.strerror}", "Check the file permissions.") from exc
+            suffix = target.suffix.lower()
+            # Photos copied from exFAT are often +x; only scripts and untyped files count as executables.
+            runnable_type = suffix in self._SCRIPT_SUFFIXES or mimetypes.guess_type(target.name)[0] is None
+            if is_alias or (runnable_type and os.access(target, os.X_OK)):
                 raise FilesBridgeError(
                     "UNSAFE_OPEN_TARGET",
                     f"Refusing to open an executable file or Finder alias: {target}",

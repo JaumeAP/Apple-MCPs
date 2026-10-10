@@ -571,6 +571,15 @@ def test_apple_update_system_setting_dispatches(monkeypatch) -> None:
     assert result.setting == "autohide"
 
 
+def test_gui_input_tools_keep_destructive_annotations_and_source_descriptions() -> None:
+    for name in ("system_gui_click_menu_path", "system_gui_press_keys", "system_gui_type_text", "system_gui_click_button", "system_gui_choose_popup_value"):
+        tool = tools.mcp._tool_manager.get_tool(name)
+        assert tool.annotations.destructive_hint is True
+        assert "full_access" in tool.description
+        assert "APPLE_SYSTEM_MCP_GUI_ALLOWED_APPS" in tool.description
+        assert "terminals" in tool.description
+
+
 def test_apple_control_frontmost_app_dispatches(monkeypatch) -> None:
     monkeypatch.setattr(
         tools,

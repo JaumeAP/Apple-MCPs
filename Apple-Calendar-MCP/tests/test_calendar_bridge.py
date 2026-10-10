@@ -1333,3 +1333,61 @@ def test_run_helper_times_out_instead_of_hanging(monkeypatch):
 
     assert failure.value.error_code == "HELPER_TIMEOUT"
     assert timeouts == [CalendarBridge._HELPER_TIMEOUT_SECONDS]
+
+
+def test_mutation_timeout_does_not_suggest_a_blind_retry(monkeypatch):
+    bridge = CalendarBridge(Path("/tmp/source.swift"), Path("/tmp/helper"))
+    monkeypatch.setattr(bridge, "_ensure_helper", lambda: None)
+
+    def stalled(command, **kwargs):
+        raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+
+    monkeypatch.setattr(subprocess, "run", stalled)
+
+    with pytest.raises(CalendarBridgeError) as failure:
+        bridge.delete_event("native-1")
+
+    assert failure.value.error_code == "HELPER_TIMEOUT"
+    assert "may or may not have been applied" in failure.value.message
+    assert "before retrying" in failure.value.suggestion
+
+
+def test_helper_compile_timeout_falls_back_to_automation(monkeypatch):
+    bridge = CalendarBridge(Path("/tmp/source.swift"), Path("/tmp/helper"))
+
+    def compile_timeout(command: str, *args: str) -> dict[str, object]:
+        raise CalendarBridgeError("HELPER_COMPILE_TIMEOUT", "slow")
+
+    monkeypatch.setattr(bridge, "_run_helper", compile_timeout)
+    monkeypatch.setattr(bridge, "_fallback_delete_event", lambda event_id: {"deleted": True})
+
+    assert bridge.delete_event("native-1") is True
+
+
+def test_update_event_treats_empty_notes_and_location_as_no_change(monkeypatch):
+    bridge = CalendarBridge(Path("/tmp/source.swift"), Path("/tmp/helper"))
+    requests = []
+
+    def fake_run_helper(command: str, *args: str) -> dict[str, object]:
+        requests.append((command, *args))
+        return {"event_id": "native-1", "title": "New"}
+
+    monkeypatch.setattr(bridge, "_run_helper", fake_run_helper)
+
+    bridge.update_event("native-1", title="New", notes="", location="  ")
+
+    assert requests == [("update-calendar-event", "native-1", '{"title": "New"}')]
+
+
+def test_recurring_events_get_occurrence_ids_in_the_helper():
+    # The Swift helper cannot run under pytest; pin the occurrence-id contract in its source.
+    from apple_calendar_mcp import calendar_bridge
+
+    package = Path(calendar_bridge.__file__).parent
+    source = (package / "apple_pim_bridge.swift").read_text()
+
+    assert "event_id: eventID(event)," in source
+    assert source.count("resolveEvent(store: store, eventID: eventID)") == 4
+    assert source.count("store.event(withIdentifier:") == 1
+    # Both update and delete describe which occurrence a bare id targets.
+    assert (package / "tools.py").read_text().count("or the first occurrence for a bare id") == 2

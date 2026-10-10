@@ -550,3 +550,73 @@ def test_append_to_note_refuses_note_with_attachments(monkeypatch) -> None:
         bridge.append_to_note("note-1", "<div>More</div>")
 
     assert exc_info.value.error_code == "NOTE_HAS_ATTACHMENTS"
+
+
+def test_update_note_refuses_rename_of_note_with_attachments(monkeypatch) -> None:
+    # A rename or tags change rewrites the whole body with `set body`, which
+    # drops attachments, exactly like append.
+    bridge = AppleNotesBridge(Path("/tmp/scripts"))
+    bridge._folder_by_id = lambda folder_id: None  # type: ignore[method-assign]
+    monkeypatch.setattr(bridge, "list_attachments", lambda note_id: [AttachmentInfo(name="photo.jpg")])
+
+    def fake_run_script(script_name: str, *args: str) -> dict[str, object]:
+        if script_name == "get_note.applescript":
+            return {"found": True, "note": _note_payload("note-1", "Trip")}
+        raise AssertionError(f"Unexpected script: {script_name}")
+
+    monkeypatch.setattr(bridge, "_run_script", fake_run_script)
+
+    with pytest.raises(NotesBridgeError) as exc_info:
+        bridge.update_note("note-1", title="New title")
+
+    assert exc_info.value.error_code == "NOTE_HAS_ATTACHMENTS"
+
+
+def test_update_note_treats_empty_title_as_keep(monkeypatch) -> None:
+    # Models send "" for unused optional strings: a move must not rename or
+    # rewrite the body.
+    bridge = AppleNotesBridge(Path("/tmp/scripts"))
+    bridge._folder_by_id = lambda folder_id: None  # type: ignore[method-assign]
+    sent: dict[str, tuple[str, ...]] = {}
+
+    def fake_run_script(script_name: str, *args: str) -> dict[str, object]:
+        assert script_name == "update_note.applescript"
+        sent["args"] = args
+        return {"note": _note_payload("note-1", "Trip")}
+
+    monkeypatch.setattr(bridge, "_run_script", fake_run_script)
+
+    bridge.update_note("note-1", title="", body_html="", folder_id="folder-2")
+
+    assert sent["args"] == ("note-1", "", "", "folder-2", "")
+
+
+def test_run_script_parses_post_1987_epochs(monkeypatch, tmp_path) -> None:
+    # date_to_epoch used to return a real past 2^29 seconds, rendered with the
+    # locale's decimal separator ("1,791634755E+9" on ca_ES): invalid JSON.
+    (tmp_path / "list_notes.applescript").write_text("on run argv\nend run\n")
+    bridge = AppleNotesBridge(tmp_path)
+    stdout = '{"items":[{"note_id":"n1","created_epoch":1791634755,"modified_epoch":1791634755}]}'
+    monkeypatch.setattr(
+        "apple_notes_mcp.notes_bridge.subprocess.run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, stdout=stdout, stderr=""),
+    )
+
+    payload = bridge._run_script("list_notes.applescript")
+
+    assert payload["items"][0]["created_epoch"] == 1791634755  # type: ignore[index]
+    scripts_dir = Path(__file__).resolve().parents[1] / "src" / "apple_notes_mcp" / "applescripts"
+    for name in ("list_notes.applescript", "get_note.applescript"):
+        handler = (scripts_dir / name).read_text().split("on date_to_epoch(", 1)[1].split("end date_to_epoch", 1)[0]
+        assert "(dateValue - epochDate) as integer" not in handler
+        assert "elapsedSeconds div 100000" in handler
+
+
+def test_per_note_reads_resolve_the_note_by_id() -> None:
+    # `repeat with n in notes of fld` yields positional references: reads must
+    # go through `note id`, or a concurrent reorder pairs an id with another
+    # note's properties.
+    scripts_dir = Path(__file__).resolve().parents[1] / "src" / "apple_notes_mcp" / "applescripts"
+    list_handler = (scripts_dir / "list_notes.applescript").read_text().split("on note_json(", 1)[1].split("end note_json", 1)[0]
+    assert "set n to note id noteId" in list_handler
+    assert "note id targetNoteId, true)" in (scripts_dir / "get_note.applescript").read_text()

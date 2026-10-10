@@ -56,6 +56,8 @@ class ContactListResponse(BaseModel):
 class ContactResponse(BaseModel):
     ok: Literal[True] = True
     contact: ContactDetail
+    # Set by contacts_update_contact: fields passed empty, which update leaves as they were.
+    unchanged_fields: list[str] = Field(default_factory=list)
 
 
 class DuplicateEvidence(BaseModel):

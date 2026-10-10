@@ -129,6 +129,8 @@ def notes_recent_resource() -> str:
 )
 def notes_note_resource(note_id: str) -> str:
     note = _bridge().get_note(note_id)
+    # Same allowlist gate as notes_get_note; Apple-Tools-MCP re-registers this function.
+    ensure_action_allowed("notes_get_note", note.account_name, note.folder_name)
     return _resource_json(note.model_dump())
 
 
@@ -261,6 +263,7 @@ def notes_list_notes(account_name: str | None = None, folder_id: str | None = No
     try:
         limit_value = _coerce_int_arg("limit", limit, minimum=1)
         offset_value = _coerce_int_arg("offset", offset, minimum=0)
+        folder_id = folder_id or None
         folder = _folder_info(folder_id)
         ensure_action_allowed("notes_list_notes", account_name or (folder.account_name if folder is not None else None), folder.name if folder is not None else None)
         notes = _within_allowlist(_bridge().list_notes(account_name=account_name, folder_id=folder_id))
@@ -301,9 +304,11 @@ def notes_search_notes(query: str, account_name: str | None = None, folder_id: s
     try:
         limit_value = _coerce_int_arg("limit", limit, minimum=1)
         offset_value = _coerce_int_arg("offset", offset, minimum=0)
+        folder_id = folder_id or None
         folder = _folder_info(folder_id)
         ensure_action_allowed("notes_search_notes", account_name or (folder.account_name if folder is not None else None), folder.name if folder is not None else None)
-        notes = _within_allowlist(_bridge().search_notes(query=query, account_name=account_name, folder_id=folder_id, limit=100))
+        # Filter before paging: a cap applied first could fill up with blocked notes.
+        notes = _within_allowlist(_bridge().search_notes(query=query, account_name=account_name, folder_id=folder_id, limit=None))
         page = notes[offset_value : offset_value + limit_value]
         return NoteListResponse(notes=page, count=len(page))
     except SafetyError as exc:
@@ -339,17 +344,22 @@ def notes_create_note(title: str, folder_id: str, body_html: str | None = None, 
 
 @mcp.tool(
     title="Update Note",
-    description="Update an existing note.",
-    annotations=ToolAnnotations(destructive_hint=False, idempotent_hint=False, open_world_hint=False),
+    description=(
+        "Update an existing note. A title, body or tags change rewrites the whole body: checklist state may be lost "
+        "and notes with attachments are refused. Moving with folder_id alone keeps the body."
+    ),
+    annotations=ToolAnnotations(destructive_hint=True, idempotent_hint=False, open_world_hint=False),
     structured_output=True,
 )
 def notes_update_note(note_id: str, title: str | None = None, body_html: str | None = None, folder_id: str | None = None, tags: list[str] | None = None) -> NoteResponse | ErrorResponse:
     try:
+        folder_id = folder_id or None
         current = _bridge().get_note(note_id)
-        target_folder = _folder_info(folder_id) if folder_id is not None else None
-        target_account = target_folder.account_name if target_folder is not None else current.account_name
-        target_folder_name = target_folder.name if target_folder is not None else current.folder_name
-        ensure_action_allowed("notes_update_note", target_account, target_folder_name)
+        # Both the note's current folder and any destination must be allowed.
+        ensure_action_allowed("notes_update_note", current.account_name, current.folder_name)
+        target_folder = _folder_info(folder_id)
+        if target_folder is not None:
+            ensure_action_allowed("notes_update_note", target_folder.account_name, target_folder.name)
         note = _bridge().update_note(note_id, title=title, body_html=body_html, folder_id=folder_id, tags=tags)
         return NoteResponse(note=note)
     except SafetyError as exc:
@@ -413,9 +423,12 @@ def notes_delete_note(note_id: str) -> DeleteNoteResponse | ErrorResponse:
 )
 def notes_move_note(note_id: str, folder_id: str) -> MoveNoteResponse | ErrorResponse:
     try:
+        # Required here: "" must fail as FOLDER_NOT_FOUND, never mean "no move".
         target_folder = _folder_info(folder_id)
         target_account = target_folder.account_name if target_folder is not None else None
         ensure_action_allowed("notes_move_note", target_account, target_folder.name if target_folder is not None else None)
+        current = _bridge().get_note(note_id)
+        ensure_action_allowed("notes_move_note", current.account_name, current.folder_name)
         note = _bridge().move_note(note_id, folder_id)
         return MoveNoteResponse(note=note)
     except SafetyError as exc:
@@ -473,6 +486,15 @@ def notes_delete_folder(folder_id: str) -> DeleteFolderResponse | ErrorResponse:
     try:
         folder = _folder_info(folder_id)
         ensure_action_allowed("notes_delete_folder", folder.account_name, folder.name)
+        # Notes deletes nested subfolders too: each one must pass the allowlist.
+        folders = _bridge().list_folders()
+        pending = [folder_id]
+        while pending:
+            parent_id = pending.pop()
+            for child in folders:
+                if child.parent_folder_id == parent_id:
+                    ensure_action_allowed("notes_delete_folder", child.account_name, child.name)
+                    pending.append(child.folder_id)
         deleted = _bridge().delete_folder(folder_id)
         return DeleteFolderResponse(deleted=deleted, folder_id=folder_id)
     except SafetyError as exc:

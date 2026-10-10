@@ -13,7 +13,7 @@ async def system_gui_click_menu_path(
 ) -> Any:
     """Click Menu Path
 
-    Click a menu path in a named application, for example ['File', 'New Window']. This is a GUI fallback tool. Requires full_access and refuses terminal apps.
+    Click a menu path in a named application, for example ['File', 'New Window']. This is a GUI fallback tool. Requires full_access and a target whose bundle id is listed in APPLE_SYSTEM_MCP_GUI_ALLOWED_APPS; terminals and apps that run typed code (Script Editor, Automator, Shortcuts, IDEs) are always refused.
 
     Example:
         await system_gui_click_menu_path(client, menu_path=[], application='example_application')

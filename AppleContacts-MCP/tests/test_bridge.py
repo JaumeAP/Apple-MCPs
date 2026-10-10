@@ -379,6 +379,52 @@ def test_resolve_recipient_rejects_several_name_matches(monkeypatch) -> None:
     assert failure.value.error_code == "AMBIGUOUS_CONTACT"
 
 
+@pytest.mark.parametrize(
+    ("query", "target", "other"),
+    [
+        ("ann@example.com", contact_item("ann", name="Ann Smith", email="ann@example.com"), contact_item("joann", name="Joann Roe", email="joann@example.com")),
+        ("+15551234567", contact_item("plain", name="Plain Number", phone="+15551234567"), contact_item("ext", name="Ext Number", phone="+1 555 123 4567 ext. 89")),
+    ],
+)
+def test_resolve_recipient_complete_value_ignores_partial_match_and_returns_queried_method(monkeypatch, query, target, other) -> None:
+    bridge = AppleContactsBridge(*UNUSED_HELPER)
+    # The queried value is the target's second method: the result must be that one.
+    decoy = {"label": "home", "value": "+15550000000" if target["phones"] else "decoy@example.com"}
+    target_detail = {**target, "note": ""}
+    methods_key = "phones" if target["phones"] else "emails"
+    target_detail[methods_key] = [decoy, *target[methods_key]]
+
+    def fake_run_script(script_name: str, *args: str) -> dict[str, object]:
+        if script_name == "list_contacts.applescript":
+            return {"total": 2, "items": [other, target]}
+        assert script_name == "get_contact.applescript"
+        assert args == (target["contact_id"],)
+        return {"found": True, "contact": target_detail}
+
+    monkeypatch.setattr(bridge, "_run_script", fake_run_script)
+
+    result = bridge.resolve_message_recipient(query, channel="any")
+
+    assert result.contact.contact_id == target["contact_id"]
+    assert result.recipient_value == target[methods_key][0]["value"]
+
+
+def test_resolve_recipient_rejects_complete_value_held_by_two_contacts(monkeypatch) -> None:
+    bridge = AppleContactsBridge(*UNUSED_HELPER)
+    items = [contact_item("one", email="shared@example.com"), contact_item("two", email="Shared@Example.com")]
+
+    def fake_run_script(script_name: str, *args: str) -> dict[str, object]:
+        assert script_name == "list_contacts.applescript"
+        return {"total": 2, "items": items}
+
+    monkeypatch.setattr(bridge, "_run_script", fake_run_script)
+
+    with pytest.raises(ContactsBridgeError) as failure:
+        bridge.resolve_message_recipient("shared@example.com", channel="email")
+    assert failure.value.error_code == "AMBIGUOUS_CONTACT"
+    assert "contact_id" not in (failure.value.suggestion or "")
+
+
 @pytest.mark.skipif(
     sys.platform != "darwin" or shutil.which("swiftc") is None,
     reason="swiftc is only available on macOS with the Xcode tools",

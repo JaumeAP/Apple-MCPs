@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import quote_plus, urlencode
@@ -37,7 +38,8 @@ class AppleMapsBridge:
         if self.helper_binary.exists() and self.helper_binary.stat().st_mtime >= self.helper_source.stat().st_mtime:
             return
         # Compile beside the target and rename atomically, so a concurrent caller never runs a half-written binary.
-        temp_binary = self.helper_binary.with_name(f".{self.helper_binary.name}.{os.getpid()}.tmp")
+        # A per-call name: the pid is shared by every thread of this server.
+        temp_binary = self.helper_binary.with_name(f".{self.helper_binary.name}.{uuid.uuid4().hex}.tmp")
         try:
             subprocess.run(
                 ["swiftc", "-parse-as-library", "-O", str(self.helper_source), "-o", str(temp_binary)],
