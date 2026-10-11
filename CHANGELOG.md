@@ -6,6 +6,36 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 ## [Unreleased]
 
+## [1.0.5-jap.20] - 2026-10-11 (JaumeAP fork)
+
+Applies the two findings that 1.0.5-jap.19 left open.
+
+### Security
+
+- Notes, Messages, Shortcuts: the safety mode defaults to `safe_manage` when
+  `APPLE_*_MCP_SAFETY_MODE` is unset, like the other servers (it was
+  `full_access`). An invalid value still fails closed to `safe_readonly`. The
+  `server.json` defaults, the MCPB manifests (Notes, Messages, Shortcuts and the
+  Apple-Tools bundle) and the READMEs follow. The plugin sets
+  `APPLE_MESSAGES_MCP_SAFETY_MODE=full_access` for apple-messages (Notes and
+  Shortcuts already had it), so the plugin install behaves as before.
+
+### Fixed
+
+- Contacts: a phone query that is a 7+ digit suffix of a stored number only
+  resolves as the same number when the digits in front of it are a country
+  calling code (embedded ITU list, 1 to 3 digits), after dropping a leading `+`
+  or `00`. A different area code or an unassigned prefix no longer resolves as
+  the exact recipient. `+44 ...` and `0044 ...` match the national form with the
+  same trailing digits. A country calling code followed by one `0` trunk digit
+  is also accepted, so a stored `+44 (0)20 7946 0958` matches the bare
+  `20 7946 0958`. A national number written with its own leading `0` (`020 7946
+  0958`, `07911 123456`) matches the `+CC` form without the `(0)` (`+44 20 7946
+  0958`, `0044 20 ...`); the single leading `0` is dropped before comparing. A
+  `+CC`, `00CC` and bare national form of Spanish, UK and US numbers are covered
+  by a both-directions matrix test. Residual risk: an area code that equals a country code
+  (stored `44 5551234`, query `5551234`) still matches.
+
 ## [1.0.5-jap.19] - 2026-10-11 (JaumeAP fork)
 
 Fixes from an automated review of 1.0.5-jap.18. Two findings are not applied

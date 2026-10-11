@@ -88,9 +88,9 @@ This builds one uv workspace environment with the unified entrypoint at `.venv/b
         "APPLE_FILES_MCP_SAFETY_MODE": "safe_manage",
         "APPLE_SYSTEM_MCP_SAFETY_MODE": "safe_manage",
         "APPLE_CONTACTS_MCP_SAFETY_MODE": "safe_manage",
-        "APPLE_NOTES_MCP_SAFETY_MODE": "full_access",
-        "APPLE_MESSAGES_MCP_SAFETY_MODE": "full_access",
-        "APPLE_SHORTCUTS_MCP_SAFETY_MODE": "full_access"
+        "APPLE_NOTES_MCP_SAFETY_MODE": "safe_manage",
+        "APPLE_MESSAGES_MCP_SAFETY_MODE": "safe_manage",
+        "APPLE_SHORTCUTS_MCP_SAFETY_MODE": "safe_manage"
       }
     }
   }

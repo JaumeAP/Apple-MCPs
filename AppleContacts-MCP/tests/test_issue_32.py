@@ -228,3 +228,72 @@ def test_phone_identity_preserves_extension_boundary_and_leading_zeroes() -> Non
     assert bridge._normalize_lookup_value("555-12345") == "55512345"
     assert bridge._normalize_lookup_value("555-1234 ext. 05") == "5551234;ext=05"
     assert bridge._normalize_lookup_value("tel:555-1234;ext=5") == "5551234;ext=5"
+
+
+def test_same_phone_requires_a_country_calling_code_in_front() -> None:
+    bridge = AppleContactsBridge(*HELPER)
+    # +44 and 0044 both match the national form with the same trailing digits.
+    assert bridge._same_phone("2079460958", "+44 2079460958")
+    assert bridge._same_phone("2079460958", "0044 2079460958")
+    assert bridge._same_phone("+44 2079460958", "0044 2079460958")
+    # An area code, or a prefix that is not a country calling code, is not the same number.
+    assert not bridge._same_phone("5551234", "+1 212 555 1234")
+    assert not bridge._same_phone("5551234", "415 555 1234")
+    assert not bridge._same_phone("5551234", "+1 415 555 1234")
+    assert not bridge._same_phone("5551234", "+000 555 1234")
+    assert not bridge._same_phone("5551234", "+99 555 1234")
+    # A real country calling code still matches, with its extension.
+    assert bridge._same_phone("555-1234 x5", "+1 555-1234 ext. 5")
+    assert not bridge._same_phone("555-1234 x5", "+1 555-1234 ext. 6")
+
+
+def test_same_phone_accepts_one_trunk_zero_after_the_country_calling_code() -> None:
+    bridge = AppleContactsBridge(*HELPER)
+    assert bridge._same_phone("20 7946 0958", "+44 (0)20 7946 0958")
+    assert bridge._same_phone("20 7946 0958", "+44 20 7946 0958")
+    # A prefix that is not a country calling code stays rejected, trunk zero or not.
+    assert not bridge._same_phone("5551234", "+99 0 555 1234")
+    assert not bridge._same_phone("5551234", "+1 415 0 555 1234")
+    assert not bridge._same_phone("5551234", "+1 00 555 1234")
+    assert bridge._same_phone("555-1234 x5", "+1 555-1234 ext. 5")
+
+
+# (query, stored, expected). Each pair is checked in both directions.
+PHONE_MATRIX = [
+    # Spain mobile and landline against every written form of the same number.
+    *[
+        (n, s, True)
+        for n in ("612 345 678", "912 345 678")
+        for s in ("+34 " + n, "0034 " + n, "34" + n.replace(" ", ""), n.replace(" ", ""))
+    ],
+    # UK mobile, with and without the (0) trunk digit, and landline.
+    ("07911 123456", "+44 7911 123456", True),
+    ("07911 123456", "+44 (0)7911 123456", True),
+    ("07911 123456", "07911 123456", True),
+    ("020 7946 0958", "+44 20 7946 0958", True),
+    ("020 7946 0958", "0044 20 7946 0958", True),
+    ("020 7946 0958", "+44 (0)20 7946 0958", True),
+    ("020 7946 0958", "2079460958", True),
+    # US / Canada.
+    ("415-555-2671", "+1 415 555 2671", True),
+    ("415-555-2671", "1-415-555-2671", True),
+    ("415-555-2671", "001 415 555 2671", True),
+    # Different people: same last 7 digits, different area or mobile prefix.
+    ("415-555-2671", "+1 212 555 2671", False),
+    ("415-555-2671", "212-555-2671", False),
+    ("612 345 678", "+34 912 345 678", False),
+    ("912 345 678", "612345678", False),
+    ("612 345 678", "+34 692 345 678", False),
+    ("612 345 678", "692 345 678", False),
+    ("612 345 678", "0034 692 345 678", False),
+    ("2345678", "+34 612 345 678", False),
+    ("07911 123456", "+44 7922 123456", False),
+    ("020 7946 0958", "+44 121 7946 0958", False),
+]
+
+
+@pytest.mark.parametrize(("query", "stored", "expected"), PHONE_MATRIX)
+def test_same_phone_matrix_both_directions(query: str, stored: str, expected: bool) -> None:
+    bridge = AppleContactsBridge(*HELPER)
+    assert bridge._same_phone(query, stored) is expected
+    assert bridge._same_phone(stored, query) is expected

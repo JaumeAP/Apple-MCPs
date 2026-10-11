@@ -62,7 +62,7 @@ This builds one workspace environment with every server's entry point in `.venv/
       "command": "uvx",
       "args": ["apple-messages-mcp"],
       "env": {
-        "APPLE_MESSAGES_MCP_SAFETY_MODE": "full_access"
+        "APPLE_MESSAGES_MCP_SAFETY_MODE": "safe_manage"
       }
     }
   }
@@ -81,6 +81,10 @@ claude mcp add --transport stdio --scope project apple-messages -- uvx apple-mes
 ```
 
 </details>
+
+## Safety Modes
+
+`APPLE_MESSAGES_MCP_SAFETY_MODE` accepts `safe_readonly`, `safe_manage` and `full_access`. The default, when it is unset, is `safe_manage`. An unrecognized mode falls back to `safe_readonly`.
 
 ## Transport
 

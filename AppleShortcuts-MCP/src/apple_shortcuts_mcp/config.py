@@ -52,7 +52,7 @@ def _parse_roots(value: str | None) -> tuple[Path, ...]:
 @lru_cache(maxsize=1)
 def load_settings() -> Settings:
     root_dir = Path(__file__).resolve().parents[2]
-    raw_safety_mode = os.environ.get("APPLE_SHORTCUTS_MCP_SAFETY_MODE", "full_access").strip().lower() or "full_access"
+    raw_safety_mode = os.environ.get("APPLE_SHORTCUTS_MCP_SAFETY_MODE", "safe_manage").strip().lower() or "safe_manage"
     if raw_safety_mode not in VALID_SAFETY_MODES:
         # Fail closed: an unrecognized mode gets the most restrictive one.
         raw_safety_mode = "safe_readonly"

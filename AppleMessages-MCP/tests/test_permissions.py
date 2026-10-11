@@ -22,7 +22,7 @@ def test_safety_mode_is_normalized_and_fails_closed(monkeypatch) -> None:
 
     monkeypatch.delenv("APPLE_MESSAGES_MCP_SAFETY_MODE")
     load_settings.cache_clear()
-    assert load_settings().safety_mode == "full_access"
+    assert load_settings().safety_mode == "safe_manage"
 
 
 def teardown_function() -> None:

@@ -28,6 +28,25 @@ DIRECTORY_SCAN_PAGE_SIZE = 5000
 MAX_DIRECTORY_CONTACTS = 100_000
 HELPER_COMPILE_TIMEOUT_SECONDS = 300
 
+# ITU-T E.164 country calling codes (1 to 3 digits). A phone query that is the
+# national part of a stored number only matches when the digits in front of it
+# are one of these codes.
+COUNTRY_CALLING_CODES = frozenset(
+    "1 7 "  # noqa: SIM905 - a literal list of ~200 quoted codes is noise
+    "20 27 30 31 32 33 34 36 39 40 41 43 44 45 46 47 48 49 "
+    "51 52 53 54 55 56 57 58 60 61 62 63 64 65 66 81 82 84 86 90 91 92 93 94 95 98 "
+    "211 212 213 216 218 220 221 222 223 224 225 226 227 228 229 230 231 232 233 234 235 236 237 238 239 "
+    "240 241 242 243 244 245 246 247 248 249 250 251 252 253 254 255 256 257 258 "
+    "260 261 262 263 264 265 266 267 268 269 290 291 297 298 299 "
+    "350 351 352 353 354 355 356 357 358 359 370 371 372 373 374 375 376 377 378 379 "
+    "380 381 382 383 385 386 387 389 420 421 423 "
+    "500 501 502 503 504 505 506 507 508 509 590 591 592 593 594 595 596 597 598 599 "
+    "670 672 673 674 675 676 677 678 679 680 681 682 683 685 686 687 688 689 690 691 692 "
+    "800 808 850 852 853 855 856 870 878 880 881 882 883 886 888 "
+    "960 961 962 963 964 965 966 967 968 970 971 972 973 974 975 976 977 979 "
+    "991 992 993 994 995 996 998".split()
+)
+
 
 class ContactsBridgeError(Exception):
     def __init__(self, error_code: str, message: str, suggestion: str | None = None) -> None:
@@ -345,14 +364,39 @@ class AppleContactsBridge:
             )
         ]
 
+    @staticmethod
+    def _drop_trunk_zero(digits: str) -> str:
+        """Drop the 00 international prefix, or else a single leading 0 (the national trunk prefix)."""
+        return digits[2:] if digits.startswith("00") else digits.removeprefix("0")
+
     def _same_phone(self, query: str, value: str) -> bool:
-        """The same number and extension, allowing a missing country code (up to 3 digits)."""
+        """The same number and extension, allowing a missing country calling code.
+
+        A leading 00 (international prefix) is dropped first, as the + already is.
+        The shorter number must be a 7+ digit suffix of the longer one and the
+        digits in front of it must be exactly a country calling code, or a
+        country calling code followed by a single 0 trunk digit (stored
+        "+44 (0)20 7946 0958" matches "20 7946 0958"), so a different area code
+        never passes as a country code.
+        ponytail: an area code that equals a country code (stored "44 5551234",
+        query "5551234") still matches; resolving that needs a per-country
+        numbering plan.
+        """
         query_parts = self._phone_query_parts(query)
         value_parts = self._phone_query_parts(value)
         if query_parts is None or value_parts is None or query_parts[1] != value_parts[1]:
             return False
-        shorter, longer = sorted((query_parts[0], value_parts[0]), key=len)
-        return shorter == longer or (len(shorter) >= 7 and longer.endswith(shorter) and len(longer) - len(shorter) <= 3)
+        # A single leading 0 of a national number is the trunk prefix, not a digit of the number.
+        shorter, longer = sorted(
+            (self._drop_trunk_zero(query_parts[0]), self._drop_trunk_zero(value_parts[0])),
+            key=len,
+        )
+        if shorter == longer:
+            return True
+        if len(shorter) < 7 or not longer.endswith(shorter):
+            return False
+        prefix = longer[: len(longer) - len(shorter)]
+        return prefix in COUNTRY_CALLING_CODES or (prefix.endswith("0") and prefix[:-1] in COUNTRY_CALLING_CODES)
 
     def _queried_method(self, contact: ContactDetail, channel: str, query: str) -> tuple[str, ContactMethod] | None:
         """The method a phone or email query names, so the message goes to that value."""
