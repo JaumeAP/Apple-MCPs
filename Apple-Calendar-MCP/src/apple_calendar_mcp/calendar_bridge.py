@@ -10,6 +10,7 @@ from typing import ClassVar
 from urllib.parse import unquote
 
 from apple_calendar_mcp.models import CalendarInfo, EventDetail, EventSummary
+from apple_mcp_common.runtime import clear_if_blank
 
 
 class CalendarBridgeError(Exception):
@@ -288,6 +289,8 @@ class CalendarBridge:
         all_day: bool = False,
         recurrence: dict[str, object] | None = None,
     ) -> EventDetail:
+        notes = clear_if_blank(notes)
+        location = clear_if_blank(location)
         request = {
             "title": title,
             "calendar_id": calendar_id,
@@ -331,8 +334,11 @@ class CalendarBridge:
         all_day: bool | None = None,
         recurrence: dict[str, object] | None = None,
     ) -> EventDetail:
-        # The helper reads an empty (or whitespace-only) string as "clear": that
-        # is the only way to remove these fields, since None means "no change".
+        # An empty string clears these fields, and None means "no change". A
+        # blank value is sent as the explicit empty string so the native helper
+        # and the automation fallback both clear it.
+        notes = clear_if_blank(notes)
+        location = clear_if_blank(location)
         request: dict[str, object] = {}
         if title is not None:
             request["title"] = title

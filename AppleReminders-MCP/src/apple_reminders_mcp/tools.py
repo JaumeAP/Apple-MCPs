@@ -389,7 +389,7 @@ def reminders_create_reminder(
 
 @mcp.tool(
     title="Update Reminder",
-    description="Update one or more fields on an existing reminder. An empty list_id leaves the list unchanged; an empty notes clears the notes.",
+    description="Update one or more fields on an existing reminder. An empty list_id leaves the list unchanged; an empty or blank (only whitespace or zero-width characters) notes clears the notes.",
     annotations=ToolAnnotations(destructive_hint=False, idempotent_hint=False, open_world_hint=False),
     structured_output=True,
 )

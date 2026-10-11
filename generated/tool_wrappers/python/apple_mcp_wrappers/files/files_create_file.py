@@ -13,7 +13,7 @@ async def files_create_file(
 ) -> Any:
     """Create File
 
-    Create a new file inside the allowed roots. Pass text for UTF-8 content or content_base64 for binary content, exactly one of them. The parent folder must exist and the path must not. Never overwrites.
+    Create a new file inside the allowed roots. Pass text for UTF-8 content or content_base64 for binary content, exactly one of them (an empty string on the other one counts as unset). The parent folder must exist and the path must not, and no segment below the allowed root may start with a dot. Never overwrites.
 
     Example:
         await files_create_file(client, path='/path/to/item', text='example_text')

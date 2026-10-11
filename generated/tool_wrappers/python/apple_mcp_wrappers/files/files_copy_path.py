@@ -12,7 +12,7 @@ async def files_copy_path(
 ) -> Any:
     """Copy Path
 
-    Copy a file, byte for byte, or a whole folder with everything in it to a new path inside the allowed roots. The destination must not exist; nothing is overwritten.
+    Copy a file, byte for byte, or a whole folder with everything in it to a new path inside the allowed roots. The destination must not exist, may not have a segment that starts with a dot, and nothing is overwritten. Execute permission bits are not copied. A failed copy leaves no partial destination.
 
     Example:
         await files_copy_path(client, source='example_source', destination='example_destination')

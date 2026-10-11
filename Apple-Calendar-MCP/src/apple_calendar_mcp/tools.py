@@ -354,7 +354,7 @@ def calendar_create_event(
 
 @mcp.tool(
     title="Update Event",
-    description="Update one or more fields on an existing calendar event. With native Calendar access, a recurring event is changed for one occurrence only, not the rest of the series: the occurrence named by an event_id from list or get (\"<id>@<original start>\"), or the first occurrence for a bare id. The automation fallback may act on the whole series. An empty notes or location clears that field; an empty calendar_id does not move the event.",
+    description="Update one or more fields on an existing calendar event. With native Calendar access, a recurring event is changed for one occurrence only, not the rest of the series: the occurrence named by an event_id from list or get (\"<id>@<original start>\"), or the first occurrence for a bare id. The automation fallback may act on the whole series. An empty or blank (only whitespace or zero-width characters) notes or location clears that field; an empty calendar_id does not move the event.",
     annotations=ToolAnnotations(destructive_hint=False, idempotent_hint=False, open_world_hint=False),
     structured_output=True,
 )

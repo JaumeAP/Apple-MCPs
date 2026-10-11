@@ -408,7 +408,8 @@ async def files_create_folder(path: str, ctx: Context) -> FileMutationResponse |
     title="Create File",
     description=(
         "Create a new file inside the allowed roots. Pass text for UTF-8 content or content_base64 for binary content, "
-        "exactly one of them. The parent folder must exist and the path must not. Never overwrites."
+        "exactly one of them (an empty string on the other one counts as unset). The parent folder must exist and the "
+        "path must not, and no segment below the allowed root may start with a dot. Never overwrites."
     ),
     annotations=ToolAnnotations(destructive_hint=False, idempotent_hint=False, open_world_hint=False),
     structured_output=True,
@@ -427,7 +428,10 @@ async def files_create_file(
 
 @mcp.tool(
     title="Move Path",
-    description="Move or rename a file or folder inside the allowed roots.",
+    description=(
+        "Move or rename a file or folder inside the allowed roots. An allowed root, or a folder that contains one, "
+        "is never moved, and the destination may not have a segment that starts with a dot."
+    ),
     annotations=ToolAnnotations(destructive_hint=False, idempotent_hint=False, open_world_hint=False),
     structured_output=True,
 )
@@ -445,7 +449,8 @@ async def files_move_path(source: str, destination: str, ctx: Context) -> FileMu
     title="Copy Path",
     description=(
         "Copy a file, byte for byte, or a whole folder with everything in it to a new path inside the allowed roots. "
-        "The destination must not exist; nothing is overwritten."
+        "The destination must not exist, may not have a segment that starts with a dot, and nothing is overwritten. "
+        "Execute permission bits are not copied. A failed copy leaves no partial destination."
     ),
     annotations=ToolAnnotations(destructive_hint=False, idempotent_hint=False, open_world_hint=False),
     structured_output=True,

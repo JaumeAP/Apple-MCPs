@@ -13,7 +13,13 @@ from pathlib import Path
 
 import pytest
 
-from apple_mcp_common.runtime import notify_resource_updated, notify_resources_changed, require_loopback_host, swift_trim
+from apple_mcp_common.runtime import (
+    clear_if_blank,
+    notify_resource_updated,
+    notify_resources_changed,
+    require_loopback_host,
+    swift_trim,
+)
 
 
 def test_swift_trim_matches_foundation_whitespace() -> None:
@@ -22,6 +28,14 @@ def test_swift_trim_matches_foundation_whitespace() -> None:
     assert swift_trim(f"{zwsp}{ideographic_space}ID-1\n{zwsp}") == "ID-1"
     assert swift_trim("\x1cID") == "\x1cID"
     assert swift_trim(zwsp) == ""
+
+
+def test_clear_if_blank_maps_blank_values_to_the_empty_string() -> None:
+    assert clear_if_blank(None) is None
+    for blank in ("", " ", "\n\t", "​", "‌‍﻿", " ​ "):
+        assert clear_if_blank(blank) == ""
+    for kept in ("a", " a ", "​a​", "\x1c"):
+        assert clear_if_blank(kept) == kept
 
 
 @pytest.mark.parametrize("host", ["localhost", "127.0.0.1", "::1"])

@@ -926,7 +926,7 @@
         "text: string (optional)",
         "content_base64: string (optional)"
       ],
-      "description": "Create a new file inside the allowed roots. Pass text for UTF-8 content or content_base64 for binary content, exactly one of them. The parent folder must exist and the path must not. Never overwrites.",
+      "description": "Create a new file inside the allowed roots. Pass text for UTF-8 content or content_base64 for binary content, exactly one of them (an empty string on the other one counts as unset). The parent folder must exist and the path must not, and no segment below the allowed root may start with a dot. Never overwrites.",
       "domain": "files",
       "example_calls": [
         {
@@ -964,7 +964,7 @@
         "content"
       ],
       "title": "Create File",
-      "usage_intent": "Create a new file inside the allowed roots. Pass text for UTF-8 content or content_base64 for binary content, exactly one of them. The parent folder must exist and the path must not. Never overwrites."
+      "usage_intent": "Create a new file inside the allowed roots. Pass text for UTF-8 content or content_base64 for binary content, exactly one of them (an empty string on the other one counts as unset). The parent folder must exist and the path must not, and no segment below the allowed root may start with a dot. Never overwrites."
     },
     {
       "aliases": [
@@ -984,7 +984,7 @@
         "source: string (required)",
         "destination: string (required)"
       ],
-      "description": "Move or rename a file or folder inside the allowed roots.",
+      "description": "Move or rename a file or folder inside the allowed roots. An allowed root, or a folder that contains one, is never moved, and the destination may not have a segment that starts with a dot.",
       "domain": "files",
       "example_calls": [
         {
@@ -1015,10 +1015,14 @@
         "rename",
         "allowed",
         "roots",
-        "root"
+        "root",
+        "that",
+        "contains",
+        "contain",
+        "one"
       ],
       "title": "Move Path",
-      "usage_intent": "Move or rename a file or folder inside the allowed roots."
+      "usage_intent": "Move or rename a file or folder inside the allowed roots. An allowed root, or a folder that contains one, is never moved, and the destination may not have a segment that starts with a dot."
     },
     {
       "aliases": [
@@ -1038,7 +1042,7 @@
         "source: string (required)",
         "destination: string (required)"
       ],
-      "description": "Copy a file, byte for byte, or a whole folder with everything in it to a new path inside the allowed roots. The destination must not exist; nothing is overwritten.",
+      "description": "Copy a file, byte for byte, or a whole folder with everything in it to a new path inside the allowed roots. The destination must not exist, may not have a segment that starts with a dot, and nothing is overwritten. Execute permission bits are not copied. A failed copy leaves no partial destination.",
       "domain": "files",
       "example_calls": [
         {
@@ -1076,7 +1080,7 @@
         "destination"
       ],
       "title": "Copy Path",
-      "usage_intent": "Copy a file, byte for byte, or a whole folder with everything in it to a new path inside the allowed roots. The destination must not exist; nothing is overwritten."
+      "usage_intent": "Copy a file, byte for byte, or a whole folder with everything in it to a new path inside the allowed roots. The destination must not exist, may not have a segment that starts with a dot, and nothing is overwritten. Execute permission bits are not copied. A failed copy leaves no partial destination."
     },
     {
       "aliases": [

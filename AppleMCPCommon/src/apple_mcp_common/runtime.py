@@ -23,6 +23,22 @@ def swift_trim(value: str) -> str:
     return value.strip(SWIFT_WHITESPACE)
 
 
+ZERO_WIDTH = "​‌‍﻿"
+
+
+def clear_if_blank(value: str | None) -> str | None:
+    """Return "" for a value that is blank once whitespace and zero-width characters go.
+
+    A notes or location field set to such a value clears the field. Sending the
+    explicit empty string makes the native helper and the automation fallback
+    agree, instead of the fallback storing an invisible value. None stays None
+    (no change); any other value is returned untouched.
+    """
+    if value is not None and not value.strip(SWIFT_WHITESPACE + ZERO_WIDTH):
+        return ""
+    return value
+
+
 def require_loopback_host(host: str) -> str:
     """Return a canonical loopback HTTP host or reject it.
 

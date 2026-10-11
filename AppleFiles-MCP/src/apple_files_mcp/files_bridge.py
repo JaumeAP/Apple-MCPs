@@ -65,7 +65,7 @@ class FilesBridge:
     def _location_kind(self, path: Path) -> str:
         return "icloud" if self._is_icloud_path(path) else "local"
 
-    def _ensure_allowed(self, path: str, *, allow_missing: bool = False) -> Path:
+    def _ensure_allowed(self, path: str, *, allow_missing: bool = False, refuse_hidden: bool = False) -> Path:
         candidate = Path(path).expanduser()
         resolved = candidate.resolve(strict=False)
         if not allow_missing and not resolved.exists():
@@ -74,6 +74,13 @@ class FilesBridge:
             raise FilesBridgeError("PARENT_NOT_FOUND", f"Parent folder does not exist: {resolved.parent}", "Choose a destination inside an existing folder.")
         for root in self.allowed_roots:
             if resolved.is_relative_to(root):
+                # Hidden segments below the root are refused for destinations, as search already skips them.
+                if refuse_hidden and any(part.startswith(".") for part in resolved.relative_to(root).parts):
+                    raise FilesBridgeError(
+                        "PATH_NOT_ALLOWED",
+                        f"Destination has a hidden path segment: {resolved}",
+                        "Choose a destination without a segment that starts with a dot.",
+                    )
                 return resolved
         raise FilesBridgeError(
             "PATH_NOT_ALLOWED",
@@ -378,7 +385,14 @@ class FilesBridge:
 
     def move_path(self, source: str, destination: str) -> tuple[str, str]:
         source_path = self._ensure_allowed(source)
-        destination_path = self._ensure_allowed(destination, allow_missing=True)
+        # An allowed root, or a folder holding one, is never moved: the server would lose its own scope.
+        if any(root.is_relative_to(source_path) for root in self.allowed_roots):
+            raise FilesBridgeError(
+                "ROOT_PROTECTED",
+                f"Refusing to move an allowed root or a folder that contains one: {source_path}",
+                "Move something inside the root instead.",
+            )
+        destination_path = self._ensure_allowed(destination, allow_missing=True, refuse_hidden=True)
         # A same-file destination is a case-only rename on a case-insensitive volume, not an overwrite.
         if os.path.lexists(destination_path) and not os.path.samefile(source_path, destination_path):
             raise FilesBridgeError(
@@ -391,6 +405,11 @@ class FilesBridge:
         return str(source_path), str(destination_path)
 
     def create_file(self, path: str, text: str | None = None, content_base64: str | None = None) -> str:
+        # An empty string on the unused parameter means unset; text="" alone is an empty file.
+        if content_base64 == "" and text is not None:
+            content_base64 = None
+        elif text == "" and content_base64 is not None:
+            text = None
         if (text is None) == (content_base64 is None):
             raise FilesBridgeError("INVALID_INPUT", "Pass exactly one of text or content_base64.", "Use text for UTF-8 content, content_base64 for binary content.")
         if content_base64 is not None:
@@ -402,7 +421,7 @@ class FilesBridge:
             payload = (text or "").encode("utf-8")
         if len(payload) > self._MAX_WRITE_BYTES:
             raise FilesBridgeError("TOO_LARGE", f"Content is {len(payload)} bytes; the limit is {self._MAX_WRITE_BYTES}.", "Create the file in smaller parts or copy it instead.")
-        destination = self._ensure_allowed(path, allow_missing=True)
+        destination = self._ensure_allowed(path, allow_missing=True, refuse_hidden=True)
         # Exclusive create: an existing file or folder is never overwritten.
         try:
             with destination.open("xb") as handle:
@@ -419,24 +438,47 @@ class FilesBridge:
             raise
         return str(destination)
 
+    @staticmethod
+    def _clear_execute_bits(path: Path) -> None:
+        os.chmod(path, stat.S_IMODE(path.stat().st_mode) & ~0o111)
+
+    @classmethod
+    def _copy_file_without_execute(cls, source: str, destination: str) -> str:
+        shutil.copy2(source, destination)
+        cls._clear_execute_bits(Path(destination))
+        return destination
+
     def copy_path(self, source: str, destination: str) -> tuple[str, str]:
         source_path = self._ensure_allowed(source)
-        destination_path = self._ensure_allowed(destination, allow_missing=True)
+        destination_path = self._ensure_allowed(destination, allow_missing=True, refuse_hidden=True)
         if source_path.is_dir():
             return self._copy_folder(source_path, destination_path)
         if not source_path.is_file():
             raise FilesBridgeError("NOT_A_FILE", f"Not a regular file or folder: {source_path}", "Choose a file or a folder path.")
         # Exclusive create: an existing destination is never overwritten.
+        created = False
         try:
             with source_path.open("rb") as reader, destination_path.open("xb") as writer:
+                created = True
                 shutil.copyfileobj(reader, writer)
-        except FileExistsError as exc:
+            shutil.copystat(source_path, destination_path)
+            # Execute bits are not carried over: a copy never becomes runnable by itself.
+            self._clear_execute_bits(destination_path)
+        except OSError as exc:
+            if not created and isinstance(exc, FileExistsError):
+                raise FilesBridgeError(
+                    "DESTINATION_EXISTS",
+                    f"Destination already exists: {destination_path}",
+                    "Choose a destination path that does not exist yet.",
+                ) from exc
+            # The exclusive create succeeded, so a partial destination is ours to remove.
+            if created:
+                destination_path.unlink(missing_ok=True)
             raise FilesBridgeError(
-                "DESTINATION_EXISTS",
-                f"Destination already exists: {destination_path}",
-                "Choose a destination path that does not exist yet.",
+                "COPY_FAILED",
+                f"Copy failed: {exc.strerror or exc}",
+                "The partial destination was removed; retry the copy.",
             ) from exc
-        shutil.copystat(source_path, destination_path)
         return str(source_path), str(destination_path)
 
     def _copy_folder(self, source_path: Path, destination_path: Path) -> tuple[str, str]:
@@ -452,8 +494,32 @@ class FilesBridge:
                 f"Cannot copy a folder into itself: {source_path} -> {destination_path}",
                 "Choose a destination outside the source folder.",
             )
-        # Links inside the tree are copied as links, never followed, so nothing outside the roots is read.
-        shutil.copytree(source_path, destination_path, symlinks=True)
+        # Atomic create: if it succeeds, the folder and everything under it is ours to clean up.
+        try:
+            destination_path.mkdir()
+        except FileExistsError as exc:
+            raise FilesBridgeError(
+                "DESTINATION_EXISTS",
+                f"Destination already exists: {destination_path}",
+                "Choose a destination path that does not exist yet.",
+            ) from exc
+        try:
+            # Links inside the tree are copied as links, never followed, so nothing outside the roots is read.
+            shutil.copytree(
+                source_path,
+                destination_path,
+                symlinks=True,
+                dirs_exist_ok=True,
+                copy_function=self._copy_file_without_execute,
+            )
+        except OSError as exc:  # shutil.Error is an OSError subclass
+            shutil.rmtree(destination_path, ignore_errors=True)
+            detail = str(exc)[:300] if isinstance(exc, shutil.Error) else (exc.strerror or str(exc))
+            raise FilesBridgeError(
+                "COPY_FAILED",
+                f"Copy failed: {detail}",
+                "The partial destination was removed; retry the copy.",
+            ) from exc
         return str(source_path), str(destination_path)
 
     def delete_path(self, path: str, recursive: bool = False) -> str:

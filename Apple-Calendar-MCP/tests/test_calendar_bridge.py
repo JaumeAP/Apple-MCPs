@@ -543,6 +543,48 @@ def _run_jxa_update_in_node(script: str, event_id: str, fields_json: str) -> dic
     return json.loads(completed.stdout.strip())
 
 
+@pytest.mark.parametrize("blank", ["", "   ", "​", " ​‌‍﻿\n"])
+def test_blank_notes_and_location_are_sent_as_the_empty_string_on_both_paths(monkeypatch, blank) -> None:
+    bridge = CalendarBridge(Path("/tmp/source.swift"), Path("/tmp/helper"))
+    monkeypatch.setattr(bridge, "_normalize_detail", lambda payload, **kwargs: payload)
+    native: list[dict[str, object]] = []
+    fallback: list[tuple[object, object]] = []
+
+    def fake_run_helper(command: str, *args: str) -> dict[str, object]:
+        native.append(json.loads(args[-1]))
+        return {}
+
+    def fake_fallback(event_id, **fields):
+        fallback.append((fields["notes"], fields["location"]))
+        return {}
+
+    monkeypatch.setattr(bridge, "_run_helper", fake_run_helper)
+    monkeypatch.setattr(bridge, "_fallback_update_event", fake_fallback)
+
+    bridge.update_event("event-1", notes=blank, location=blank)
+    bridge.update_event("applescript::v2::%7B", notes=blank, location=blank)
+
+    assert native == [{"notes": "", "location": ""}]
+    assert fallback == [("", "")]
+
+
+def test_update_event_keeps_none_and_real_text_for_notes_and_location(monkeypatch) -> None:
+    bridge = CalendarBridge(Path("/tmp/source.swift"), Path("/tmp/helper"))
+    monkeypatch.setattr(bridge, "_normalize_detail", lambda payload, **kwargs: payload)
+    native: list[dict[str, object]] = []
+
+    def fake_run_helper(command: str, *args: str) -> dict[str, object]:
+        native.append(json.loads(args[-1]))
+        return {}
+
+    monkeypatch.setattr(bridge, "_run_helper", fake_run_helper)
+
+    bridge.update_event("event-1", title="T")
+    bridge.update_event("event-1", notes=" keep ​", location="Room 1")
+
+    assert native == [{"title": "T"}, {"notes": " keep ​", "location": "Room 1"}]
+
+
 def test_update_event_fallback_moves_event_later_without_invalid_intermediate_state(monkeypatch) -> None:
     # The reproduced bug: the new start (17:00) is after the OLD end (14:30).
     bridge = CalendarBridge(Path("/tmp/source.swift"), Path("/tmp/helper"))

@@ -89,6 +89,8 @@ claude mcp add --transport stdio --scope project apple-files -- uvx apple-files-
 - Confirm the exact path before sending or attaching a file.
 - Keep `APPLE_FILES_MCP_ALLOWED_ROOTS` narrow for safety.
 - Include the local iCloud Drive root when you want the assistant to work with iCloud documents.
+- `APPLE_FILES_MCP_ALLOWED_ROOTS` entries must be absolute paths (`~/` is expanded). An unset variable uses the default roots; a value with no entry (`,`) allows no path at all.
+- Create, copy and move refuse a destination with a path segment that starts with a dot below an allowed root, and a copy never carries execute permission bits.
 - Use `APPLE_FILES_MCP_SAFETY_MODE=safe_manage` for assistant workflows that need create and move, and `full_access` only for delete workflows.
 
 ## Health And Recovery

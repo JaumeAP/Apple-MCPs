@@ -3483,7 +3483,7 @@
         "location: string (optional)",
         "all_day: boolean (optional)"
       ],
-      "description": "Update one or more fields on an existing calendar event. With native Calendar access, a recurring event is changed for one occurrence only, not the rest of the series: the occurrence named by an event_id from list or get (\"<id>@<original start>\"), or the first occurrence for a bare id. The automation fallback may act on the whole series. An empty notes or location clears that field; an empty calendar_id does not move the event.",
+      "description": "Update one or more fields on an existing calendar event. With native Calendar access, a recurring event is changed for one occurrence only, not the rest of the series: the occurrence named by an event_id from list or get (\"<id>@<original start>\"), or the first occurrence for a bare id. The automation fallback may act on the whole series. An empty or blank (only whitespace or zero-width characters) notes or location clears that field; an empty calendar_id does not move the event.",
       "domain": "apple",
       "example_calls": [
         {
@@ -3521,7 +3521,7 @@
         "rest"
       ],
       "title": "Calendar Update Event",
-      "usage_intent": "Update one or more fields on an existing calendar event. With native Calendar access, a recurring event is changed for one occurrence only, not the rest of the series: the occurrence named by an event_id from list or get (\"<id>@<original start>\"), or the first occurrence for a bare id. The automation fallback may act on the whole series. An empty notes or location clears that field; an empty calendar_id does not move the event."
+      "usage_intent": "Update one or more fields on an existing calendar event. With native Calendar access, a recurring event is changed for one occurrence only, not the rest of the series: the occurrence named by an event_id from list or get (\"<id>@<original start>\"), or the first occurrence for a bare id. The automation fallback may act on the whole series. An empty or blank (only whitespace or zero-width characters) notes or location clears that field; an empty calendar_id does not move the event."
     },
     {
       "aliases": [
@@ -3876,7 +3876,7 @@
         "remind_at: string (optional)",
         "priority: integer (optional)"
       ],
-      "description": "Update one or more fields on an existing reminder. An empty list_id leaves the list unchanged; an empty notes clears the notes.",
+      "description": "Update one or more fields on an existing reminder. An empty list_id leaves the list unchanged; an empty or blank (only whitespace or zero-width characters) notes clears the notes.",
       "domain": "apple",
       "example_calls": [
         {
@@ -3907,13 +3907,14 @@
         "leaves",
         "leav",
         "unchanged",
-        "notes",
-        "not",
-        "clears",
-        "clear"
+        "blank",
+        "only",
+        "whitespace",
+        "zero",
+        "width"
       ],
       "title": "Reminders Update Reminder",
-      "usage_intent": "Update one or more fields on an existing reminder. An empty list_id leaves the list unchanged; an empty notes clears the notes."
+      "usage_intent": "Update one or more fields on an existing reminder. An empty list_id leaves the list unchanged; an empty or blank (only whitespace or zero-width characters) notes clears the notes."
     },
     {
       "aliases": [
@@ -4701,7 +4702,7 @@
         "source: string (required)",
         "destination: string (required)"
       ],
-      "description": "Move or rename a file or folder inside the allowed roots.",
+      "description": "Move or rename a file or folder inside the allowed roots. An allowed root, or a folder that contains one, is never moved, and the destination may not have a segment that starts with a dot.",
       "domain": "apple",
       "example_calls": [
         {
@@ -4729,10 +4730,17 @@
         "folder",
         "allowed",
         "roots",
-        "root"
+        "root",
+        "that",
+        "contains",
+        "contain",
+        "one",
+        "never",
+        "moved",
+        "destination"
       ],
       "title": "Files Move Path",
-      "usage_intent": "Move or rename a file or folder inside the allowed roots."
+      "usage_intent": "Move or rename a file or folder inside the allowed roots. An allowed root, or a folder that contains one, is never moved, and the destination may not have a segment that starts with a dot."
     },
     {
       "aliases": [
