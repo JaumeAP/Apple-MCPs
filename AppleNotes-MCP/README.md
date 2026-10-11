@@ -62,7 +62,7 @@ This builds one workspace environment with every server's entry point in `.venv/
       "command": "uvx",
       "args": ["apple-mcp-notes"],
       "env": {
-        "APPLE_NOTES_MCP_SAFETY_MODE": "full_access"
+        "APPLE_NOTES_MCP_SAFETY_MODE": "safe_manage"
       }
     }
   }
@@ -88,7 +88,7 @@ claude mcp add --transport stdio --scope project apple-notes -- uvx apple-mcp-no
 - `safe_manage`
 - `full_access`
 
-`notes_delete_folder` deletes every note inside the folder, so it needs `full_access`. An unrecognized mode falls back to `safe_readonly`.
+The default, when `APPLE_NOTES_MCP_SAFETY_MODE` is unset, is `safe_manage`. `notes_delete_folder` deletes every note inside the folder, so it needs `full_access`. An unrecognized mode falls back to `safe_readonly`.
 
 With `APPLE_NOTES_MCP_ALLOWED_FOLDERS` set, every path honors the allowlist: the `notes://note/{note_id}` resource, both the source and the destination folder of a move (`notes_move_note`, `notes_update_note` with `folder_id`), every nested subfolder that `notes_delete_folder` would delete along with its parent, the parent of a folder created with `notes_create_folder`, and the folder listings (`notes_list_folders`, `notes://folders`), which hide blocked folders. The checks match folder names, so a folder named like an allowed one is allowed wherever it sits.
 

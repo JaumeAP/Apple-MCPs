@@ -9,7 +9,7 @@ def test_load_settings_defaults(monkeypatch) -> None:
 
     settings = load_settings()
 
-    assert settings.safety_mode == "full_access"
+    assert settings.safety_mode == "safe_manage"
     assert settings.shortcuts_command == "shortcuts"
 
 

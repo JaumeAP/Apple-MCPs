@@ -228,3 +228,20 @@ def test_phone_identity_preserves_extension_boundary_and_leading_zeroes() -> Non
     assert bridge._normalize_lookup_value("555-12345") == "55512345"
     assert bridge._normalize_lookup_value("555-1234 ext. 05") == "5551234;ext=05"
     assert bridge._normalize_lookup_value("tel:555-1234;ext=5") == "5551234;ext=5"
+
+
+def test_same_phone_requires_a_country_calling_code_in_front() -> None:
+    bridge = AppleContactsBridge(*HELPER)
+    # +44 and 0044 both match the national form with the same trailing digits.
+    assert bridge._same_phone("2079460958", "+44 2079460958")
+    assert bridge._same_phone("2079460958", "0044 2079460958")
+    assert bridge._same_phone("+44 2079460958", "0044 2079460958")
+    # An area code, or a prefix that is not a country calling code, is not the same number.
+    assert not bridge._same_phone("5551234", "+1 212 555 1234")
+    assert not bridge._same_phone("5551234", "415 555 1234")
+    assert not bridge._same_phone("5551234", "+1 415 555 1234")
+    assert not bridge._same_phone("5551234", "+000 555 1234")
+    assert not bridge._same_phone("5551234", "+99 555 1234")
+    # A real country calling code still matches, with its extension.
+    assert bridge._same_phone("555-1234 x5", "+1 555-1234 ext. 5")
+    assert not bridge._same_phone("555-1234 x5", "+1 555-1234 ext. 6")

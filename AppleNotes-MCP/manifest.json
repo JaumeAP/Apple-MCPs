@@ -43,7 +43,7 @@
         "server.py"
       ],
       "env": {
-        "APPLE_NOTES_MCP_SAFETY_MODE": "full_access"
+        "APPLE_NOTES_MCP_SAFETY_MODE": "safe_manage"
       }
     }
   },

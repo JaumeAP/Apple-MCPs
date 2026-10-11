@@ -32,7 +32,7 @@
             "safe_manage",
             "full_access"
           ],
-          "default": "full_access"
+          "default": "safe_manage"
         }
       ]
     },
