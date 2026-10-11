@@ -29,7 +29,11 @@ Applies the two findings that 1.0.5-jap.19 left open.
   the exact recipient. `+44 ...` and `0044 ...` match the national form with the
   same trailing digits. A country calling code followed by one `0` trunk digit
   is also accepted, so a stored `+44 (0)20 7946 0958` matches the bare
-  `20 7946 0958`. Residual risk: an area code that equals a country code
+  `20 7946 0958`. A national number written with its own leading `0` (`020 7946
+  0958`, `07911 123456`) matches the `+CC` form without the `(0)` (`+44 20 7946
+  0958`, `0044 20 ...`); the single leading `0` is dropped before comparing. A
+  `+CC`, `00CC` and bare national form of Spanish, UK and US numbers are covered
+  by a both-directions matrix test. Residual risk: an area code that equals a country code
   (stored `44 5551234`, query `5551234`) still matches.
 
 ## [1.0.5-jap.19] - 2026-10-11 (JaumeAP fork)

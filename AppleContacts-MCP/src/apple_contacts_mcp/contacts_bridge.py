@@ -364,6 +364,11 @@ class AppleContactsBridge:
             )
         ]
 
+    @staticmethod
+    def _drop_trunk_zero(digits: str) -> str:
+        """Drop the 00 international prefix, or else a single leading 0 (the national trunk prefix)."""
+        return digits[2:] if digits.startswith("00") else digits.removeprefix("0")
+
     def _same_phone(self, query: str, value: str) -> bool:
         """The same number and extension, allowing a missing country calling code.
 
@@ -381,7 +386,11 @@ class AppleContactsBridge:
         value_parts = self._phone_query_parts(value)
         if query_parts is None or value_parts is None or query_parts[1] != value_parts[1]:
             return False
-        shorter, longer = sorted((query_parts[0].removeprefix("00"), value_parts[0].removeprefix("00")), key=len)
+        # A single leading 0 of a national number is the trunk prefix, not a digit of the number.
+        shorter, longer = sorted(
+            (self._drop_trunk_zero(query_parts[0]), self._drop_trunk_zero(value_parts[0])),
+            key=len,
+        )
         if shorter == longer:
             return True
         if len(shorter) < 7 or not longer.endswith(shorter):
