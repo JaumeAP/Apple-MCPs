@@ -6,6 +6,37 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 ## [Unreleased]
 
+## [1.0.5-jap.19] - 2026-10-11 (JaumeAP fork)
+
+Fixes from an automated review of 1.0.5-jap.18. Two findings are not applied
+here: the Contacts phone matching and the unset safety-mode default of Notes,
+Messages and Shortcuts, because existing tests and documented behaviour pin the
+current ones.
+
+### Security
+
+- Files: `copy_path`, `create_file` and `move_path` refuse a destination with a
+  hidden path segment below the allowed root, as search already skips them.
+  `copy_path` no longer carries execute permission bits to the copy (files in a
+  copied folder tree included).
+- Files: `move_path` refuses an allowed root, or a folder that contains one
+  (`ROOT_PROTECTED`), like `delete_path`.
+- Files: an `APPLE_FILES_MCP_ALLOWED_ROOTS` value that is set but holds no
+  entry (`,`, ` `) gives no roots instead of the broad default roots, and a
+  relative entry is rejected at start-up instead of being resolved against the
+  working directory. An unset or empty variable keeps the defaults.
+
+### Fixed
+
+- Files: a failed `copy_path` (file or folder) removes the partial destination
+  and returns `COPY_FAILED`, so a retry no longer hits `DESTINATION_EXISTS`.
+- Files: `create_file` treats an empty string on the unused one of `text` and
+  `content_base64` as unset; `text=""` alone still makes an empty file.
+- Calendar, Reminders: a notes or location value that is blank once whitespace
+  and zero-width characters (U+200B-U+200D, U+FEFF) are removed is sent as the
+  empty string, so the native helper and the automation fallback both clear the
+  field. The tool descriptions say so.
+
 ## [1.0.5-jap.18] - 2026-10-10 (JaumeAP fork)
 
 Fixes from a `/code-review max` of 1.0.5-jap.12.
@@ -106,7 +137,7 @@ Fixes from a `/code-review max` of the security-audit changes.
   `APPLE_SYSTEM_MCP_GUI_ALLOWED_APPS` (empty by default), always refuse
   terminals and script-capable apps (Script Editor, Automator, Shortcuts,
   code editors), and stop with `GUI_TARGET_NOT_FRONTMOST` unless the target
-  is frontmost (keystrokes still go to the focused app; see 1.0.5-jap.13). `open_application`
+  is frontmost (keystrokes still go to the focused app; see 1.0.5-jap.18). `open_application`
   refuses paths and launches by bundle id. Apple-Tools marks the GUI tools
   destructive.
 - Notes: renaming or retagging a note with attachments is refused; the
@@ -130,10 +161,11 @@ Fixes from a `/code-review max` of the security-audit changes.
   and delete target that occurrence.
 - Contacts: a complete email or phone resolves to its exact owner and returns
   the queried value (without an exact owner it fell back to a containing
-  address until 1.0.5-jap.13); updates report `unchanged_fields`.
+  address until 1.0.5-jap.18); updates report `unchanged_fields`.
 - Calendar, Reminders, Maps: helper compiles use unique temp names; a timeout
   on a change no longer advises a blind retry; empty notes or location mean
-  no change; a compile timeout falls back to JXA.
+  no change (superseded in 1.0.5-jap.18: an empty notes or location clears the
+  field); a compile timeout falls back to JXA.
 - System: `read_preference_domain` accepts single-segment domains such as
   `loginwindow`.
 

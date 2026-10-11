@@ -1,3 +1,4 @@
+import json
 import subprocess
 from pathlib import Path
 
@@ -119,6 +120,27 @@ def test_update_reminder_sends_empty_notes_to_clear_them(monkeypatch) -> None:
     assert requests == [
         ("update-reminder", "x-apple-reminder://r", '{"title": "New", "notes": ""}'),
         ("update-reminder", "x-apple-reminder://r", '{"title": "New"}'),
+    ]
+
+
+@pytest.mark.parametrize("blank", ["   ", "​", " ​‌‍﻿\n"])
+def test_blank_notes_are_sent_as_the_empty_string(monkeypatch, blank) -> None:
+    bridge = RemindersBridge(Path("/tmp/source.swift"), Path("/tmp/helper"))
+    requests: list[tuple[str, ...]] = []
+
+    def fake_run_helper(command: str, *args: str) -> dict[str, object]:
+        requests.append((command, *args))
+        return {}
+
+    monkeypatch.setattr(bridge, "_run_helper", fake_run_helper)
+    monkeypatch.setattr(reminders_bridge.ReminderDetail, "model_validate", staticmethod(lambda payload: payload))
+
+    bridge.update_reminder("x-apple-reminder://r", notes=blank)
+    bridge.update_reminder("x-apple-reminder://r", notes=" real ​")
+
+    assert requests == [
+        ("update-reminder", "x-apple-reminder://r", '{"notes": ""}'),
+        ("update-reminder", "x-apple-reminder://r", json.dumps({"notes": " real ​"})),
     ]
 
 

@@ -38,14 +38,23 @@ def _default_roots() -> tuple[Path, ...]:
 
 
 def _parse_roots(value: str | None) -> tuple[Path, ...]:
+    # Unset, or an empty string that some clients pass for an optional variable: the defaults.
     if not value:
         return _default_roots()
     roots = []
     for raw in value.split(","):
-        path = Path(raw.strip()).expanduser()
-        if raw.strip():
-            roots.append(path)
-    return tuple(roots) or _default_roots()
+        entry = raw.strip()
+        if not entry:
+            continue
+        path = Path(entry).expanduser()
+        if not path.is_absolute():
+            raise ValueError(
+                f"APPLE_FILES_MCP_ALLOWED_ROOTS entry {entry!r} is not an absolute path; "
+                "use absolute paths or ~/ prefixes."
+            )
+        roots.append(path)
+    # Set but blank (',', ' '): fail closed with no roots, never the broad defaults.
+    return tuple(roots)
 
 
 @lru_cache(maxsize=1)

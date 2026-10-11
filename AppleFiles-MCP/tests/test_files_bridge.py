@@ -1,5 +1,6 @@
 import base64
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -194,6 +195,149 @@ def test_delete_path_recursive_deletes_a_tree_and_protects_roots(tmp_path) -> No
             bridge.delete_path(str(protected), recursive=True)
         assert excinfo.value.error_code in {"ROOT_PROTECTED", "PATH_NOT_ALLOWED"}
     assert root.exists()
+
+
+def test_destinations_refuse_hidden_segments_below_the_root(tmp_path) -> None:
+    root = tmp_path / "root"
+    (root / ".hidden").mkdir(parents=True)
+    source = root / "a.txt"
+    source.write_text("x")
+    folder = root / "folder"
+    folder.mkdir()
+    bridge = FilesBridge((root,))
+
+    for call in (
+        lambda: bridge.copy_path(str(source), str(root / ".copy")),
+        lambda: bridge.copy_path(str(source), str(root / ".hidden" / "a.txt")),
+        lambda: bridge.copy_path(str(folder), str(root / ".folder-copy")),
+        lambda: bridge.move_path(str(source), str(root / ".moved")),
+        lambda: bridge.create_file(str(root / ".env"), text="x"),
+        lambda: bridge.create_file(str(root / ".hidden" / "b.txt"), text="x"),
+    ):
+        with pytest.raises(FilesBridgeError) as excinfo:
+            call()
+        assert excinfo.value.error_code == "PATH_NOT_ALLOWED"
+    assert source.exists()
+    assert sorted(path.name for path in root.iterdir()) == [".hidden", "a.txt", "folder"]
+    assert list((root / ".hidden").iterdir()) == []
+
+
+def test_hidden_segments_above_the_root_do_not_matter(tmp_path) -> None:
+    root = tmp_path / ".config" / "root"
+    root.mkdir(parents=True)
+    bridge = FilesBridge((root,))
+
+    assert bridge.create_file(str(root / "a.txt"), text="x") == str((root / "a.txt").resolve())
+
+
+def test_copy_path_clears_execute_bits_but_keeps_other_modes_and_mtime(tmp_path) -> None:
+    source = tmp_path / "tool.sh"
+    source.write_text("echo hi")
+    source.chmod(0o755)
+    folder = tmp_path / "bundle"
+    (folder / "sub").mkdir(parents=True)
+    (folder / "sub" / "run").write_text("x")
+    (folder / "sub" / "run").chmod(0o750)
+    bridge = FilesBridge((tmp_path,))
+
+    bridge.copy_path(str(source), str(tmp_path / "tool-copy.sh"))
+    bridge.copy_path(str(folder), str(tmp_path / "bundle-copy"))
+
+    copied = tmp_path / "tool-copy.sh"
+    assert copied.stat().st_mode & 0o777 == 0o644
+    assert copied.stat().st_mtime == source.stat().st_mtime
+    assert (tmp_path / "bundle-copy" / "sub" / "run").stat().st_mode & 0o777 == 0o640
+    assert (tmp_path / "bundle-copy" / "sub").stat().st_mode & 0o100  # folders stay traversable
+    assert source.stat().st_mode & 0o777 == 0o755
+
+
+def test_copy_path_removes_a_partial_file_and_allows_a_retry(monkeypatch, tmp_path) -> None:
+    source = tmp_path / "a.bin"
+    source.write_bytes(b"payload")
+    destination = tmp_path / "b.bin"
+    bridge = FilesBridge((tmp_path,))
+
+    def broken_copy(reader, writer):
+        writer.write(b"pay")
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr("apple_files_mcp.files_bridge.shutil.copyfileobj", broken_copy)
+    with pytest.raises(FilesBridgeError) as excinfo:
+        bridge.copy_path(str(source), str(destination))
+    assert excinfo.value.error_code == "COPY_FAILED"
+    assert not destination.exists()
+
+    monkeypatch.undo()
+    bridge.copy_path(str(source), str(destination))
+    assert destination.read_bytes() == b"payload"
+
+
+def test_copy_path_removes_a_partial_folder_and_never_removes_a_foreign_one(monkeypatch, tmp_path) -> None:
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "a.txt").write_text("a")
+    (source / "b.txt").write_text("b")
+    destination = tmp_path / "dst"
+    bridge = FilesBridge((tmp_path,))
+    real_copy2 = shutil.copy2
+    calls = []
+
+    def flaky_copy2(src, dst, **kwargs):
+        calls.append(src)
+        if len(calls) == 2:
+            raise OSError(5, "Input/output error")
+        return real_copy2(src, dst, **kwargs)
+
+    monkeypatch.setattr("apple_files_mcp.files_bridge.shutil.copy2", flaky_copy2)
+    with pytest.raises(FilesBridgeError) as excinfo:
+        bridge.copy_path(str(source), str(destination))
+    assert excinfo.value.error_code == "COPY_FAILED"
+    assert not destination.exists()
+
+    monkeypatch.undo()
+    bridge.copy_path(str(source), str(destination))
+    assert (destination / "b.txt").read_text() == "b"
+
+    # A destination that already exists is refused and left alone.
+    with pytest.raises(FilesBridgeError) as excinfo:
+        bridge.copy_path(str(source), str(destination))
+    assert excinfo.value.error_code == "DESTINATION_EXISTS"
+    assert (destination / "a.txt").exists()
+
+
+def test_move_path_protects_allowed_roots_and_their_ancestors(tmp_path) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "a.txt").write_text("x")
+    bridge = FilesBridge((root, tmp_path))
+
+    # The root itself, and a folder above it that another root makes reachable.
+    for source in (root, tmp_path):
+        with pytest.raises(FilesBridgeError) as excinfo:
+            bridge.move_path(str(source), str(tmp_path / "elsewhere"))
+        assert excinfo.value.error_code == "ROOT_PROTECTED"
+    assert root.exists()
+
+    # Ordinary files and folders inside a root still move.
+    bridge.move_path(str(root / "a.txt"), str(root / "b.txt"))
+    assert (root / "b.txt").exists()
+
+
+def test_create_file_treats_an_empty_unused_parameter_as_unset(tmp_path) -> None:
+    bridge = FilesBridge((tmp_path,))
+
+    bridge.create_file(str(tmp_path / "a.txt"), text="hi", content_base64="")
+    bridge.create_file(str(tmp_path / "b.bin"), text="", content_base64=base64.b64encode(b"\x00\x01").decode())
+    bridge.create_file(str(tmp_path / "c.txt"), text="", content_base64="")
+    bridge.create_file(str(tmp_path / "d.txt"), content_base64="")
+
+    assert (tmp_path / "a.txt").read_text() == "hi"
+    assert (tmp_path / "b.bin").read_bytes() == b"\x00\x01"
+    assert (tmp_path / "c.txt").read_bytes() == b""
+    assert (tmp_path / "d.txt").read_bytes() == b""
+    with pytest.raises(FilesBridgeError) as excinfo:
+        bridge.create_file(str(tmp_path / "e.txt"), text="x", content_base64="eA==")
+    assert excinfo.value.error_code == "INVALID_INPUT"
 
 
 def test_recent_files_ignores_injected_paths_outside_roots(tmp_path) -> None:

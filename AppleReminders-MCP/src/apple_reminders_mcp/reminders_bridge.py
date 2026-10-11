@@ -6,6 +6,7 @@ import subprocess
 import uuid
 from pathlib import Path
 
+from apple_mcp_common.runtime import clear_if_blank
 from apple_reminders_mcp.config import load_settings
 from apple_reminders_mcp.models import (
     DeleteReminderListResponse,
@@ -85,7 +86,7 @@ class RemindersBridge:
         parent_reminder_id: str | None = None,
         tags: list[str] | None = None,
     ) -> ReminderDetail:
-        combined_notes = notes or ""
+        combined_notes = clear_if_blank(notes) or ""
         if tags:
             tag_str = " ".join(f"#{t.lstrip('#')}" for t in tags)
             combined_notes = f"{combined_notes}\n\n{tag_str}".strip()
@@ -119,8 +120,9 @@ class RemindersBridge:
         parent_reminder_id: str | None = None,
         tags: list[str] | None = None,
     ) -> ReminderDetail:
-        # The helper reads an empty (or whitespace-only) string as "clear": that
-        # is the only way to remove notes, since None means "no change".
+        # An empty string clears the notes, and None means "no change". A blank
+        # value is sent as the explicit empty string.
+        notes = clear_if_blank(notes)
         request: dict[str, object] = {}
         if title is not None:
             request["title"] = title
