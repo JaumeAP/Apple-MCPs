@@ -245,3 +245,14 @@ def test_same_phone_requires_a_country_calling_code_in_front() -> None:
     # A real country calling code still matches, with its extension.
     assert bridge._same_phone("555-1234 x5", "+1 555-1234 ext. 5")
     assert not bridge._same_phone("555-1234 x5", "+1 555-1234 ext. 6")
+
+
+def test_same_phone_accepts_one_trunk_zero_after_the_country_calling_code() -> None:
+    bridge = AppleContactsBridge(*HELPER)
+    assert bridge._same_phone("20 7946 0958", "+44 (0)20 7946 0958")
+    assert bridge._same_phone("20 7946 0958", "+44 20 7946 0958")
+    # A prefix that is not a country calling code stays rejected, trunk zero or not.
+    assert not bridge._same_phone("5551234", "+99 0 555 1234")
+    assert not bridge._same_phone("5551234", "+1 415 0 555 1234")
+    assert not bridge._same_phone("5551234", "+1 00 555 1234")
+    assert bridge._same_phone("555-1234 x5", "+1 555-1234 ext. 5")

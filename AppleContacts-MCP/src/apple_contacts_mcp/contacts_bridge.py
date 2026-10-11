@@ -369,8 +369,10 @@ class AppleContactsBridge:
 
         A leading 00 (international prefix) is dropped first, as the + already is.
         The shorter number must be a 7+ digit suffix of the longer one and the
-        digits in front of it must be exactly a country calling code, so a
-        different area code never passes as a country code.
+        digits in front of it must be exactly a country calling code, or a
+        country calling code followed by a single 0 trunk digit (stored
+        "+44 (0)20 7946 0958" matches "20 7946 0958"), so a different area code
+        never passes as a country code.
         ponytail: an area code that equals a country code (stored "44 5551234",
         query "5551234") still matches; resolving that needs a per-country
         numbering plan.
@@ -382,7 +384,10 @@ class AppleContactsBridge:
         shorter, longer = sorted((query_parts[0].removeprefix("00"), value_parts[0].removeprefix("00")), key=len)
         if shorter == longer:
             return True
-        return len(shorter) >= 7 and longer.endswith(shorter) and longer[: len(longer) - len(shorter)] in COUNTRY_CALLING_CODES
+        if len(shorter) < 7 or not longer.endswith(shorter):
+            return False
+        prefix = longer[: len(longer) - len(shorter)]
+        return prefix in COUNTRY_CALLING_CODES or (prefix.endswith("0") and prefix[:-1] in COUNTRY_CALLING_CODES)
 
     def _queried_method(self, contact: ContactDetail, channel: str, query: str) -> tuple[str, ContactMethod] | None:
         """The method a phone or email query names, so the message goes to that value."""

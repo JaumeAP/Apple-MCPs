@@ -27,10 +27,10 @@ Applies the two findings that 1.0.5-jap.19 left open.
   calling code (embedded ITU list, 1 to 3 digits), after dropping a leading `+`
   or `00`. A different area code or an unassigned prefix no longer resolves as
   the exact recipient. `+44 ...` and `0044 ...` match the national form with the
-  same trailing digits. Residual risk: an area code that equals a country code
-  (stored `44 5551234`, query `5551234`) still matches. A stored `+44 (0)20...`
-  no longer matches the bare `20...` form, because the trunk `0` sits between
-  the code and the number.
+  same trailing digits. A country calling code followed by one `0` trunk digit
+  is also accepted, so a stored `+44 (0)20 7946 0958` matches the bare
+  `20 7946 0958`. Residual risk: an area code that equals a country code
+  (stored `44 5551234`, query `5551234`) still matches.
 
 ## [1.0.5-jap.19] - 2026-10-11 (JaumeAP fork)
 
