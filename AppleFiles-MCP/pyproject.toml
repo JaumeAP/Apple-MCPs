@@ -36,6 +36,7 @@ Issues = "https://github.com/JonathanRReed/Apple-MCPs/issues"
 
 [project.scripts]
 apple-files-mcp = "apple_files_mcp.tools:main"
+apple-files-roots = "apple_files_mcp.roots:main"
 
 [project.optional-dependencies]
 dev = [

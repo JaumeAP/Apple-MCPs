@@ -6,6 +6,17 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 ## [Unreleased]
 
+## [1.0.5-jap.21] - 2026-10-14 (JaumeAP fork)
+
+### Added
+
+- Files: the allowed folders can come from `~/.config/apple-files-mcp/allowed-roots`
+  (one absolute path or `~/` path per line, `#` starts a comment). When the file
+  exists it wins over `APPLE_FILES_MCP_ALLOWED_ROOTS`; an empty file allows no
+  folder. The directory is outside every path the Claude Code sandbox can write,
+  so only an unsandboxed process edits the list. The server reads it at startup.
+- Files: `apple-files-roots list | add <path> | remove <path>` edits that file.
+
 ## [1.0.5-jap.20] - 2026-10-11 (JaumeAP fork)
 
 Applies the two findings that 1.0.5-jap.19 left open.
