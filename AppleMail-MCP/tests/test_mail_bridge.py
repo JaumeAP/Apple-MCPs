@@ -43,3 +43,27 @@ def test_send_message_returns_resolved_from_account(monkeypatch) -> None:
 
     assert result.sent is True
     assert result.from_account == "iCloud Account"
+
+
+def test_run_osascript_times_out_with_bridge_error(monkeypatch) -> None:
+    from pathlib import Path
+    from subprocess import TimeoutExpired
+
+    from apple_mail_mcp import mail_bridge
+
+    seen: dict[str, object] = {}
+
+    def fake_run(command, **kwargs):
+        seen.update(kwargs)
+        raise TimeoutExpired(command, kwargs["timeout"])
+
+    monkeypatch.setattr(mail_bridge, "run", fake_run)
+
+    try:
+        AppleMailBridge()._run_osascript(Path("search_messages.applescript"), [])
+    except MailBridgeError as exc:
+        assert "timed out" in str(exc)
+        assert seen["timeout"] == mail_bridge.OSASCRIPT_TIMEOUT_SECONDS
+        return
+
+    raise AssertionError("_run_osascript should turn a timeout into MailBridgeError")

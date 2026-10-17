@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from importlib.resources import as_file, files
 from pathlib import Path
-from subprocess import CompletedProcess, run
+from subprocess import CompletedProcess, TimeoutExpired, run
 from urllib.parse import quote, unquote
 
 from apple_mail_mcp.models import AttachmentRecord, DeleteRecord, DraftRecord, ForwardRecord, MailboxRecord, MarkRecord, MessageRecord, MessageSummary, MoveRecord, ReplyRecord, SendRecord
@@ -10,6 +10,7 @@ from apple_mail_mcp.models import AttachmentRecord, DeleteRecord, DraftRecord, F
 FIELD_SEPARATOR = "\x1f"
 LIST_SEPARATOR = "\x1d"
 RECORD_SEPARATOR = "\x1e"
+OSASCRIPT_TIMEOUT_SECONDS = 60
 
 
 class MailBridgeError(Exception):
@@ -63,7 +64,12 @@ class AppleMailBridge:
                 capture_output=True,
                 text=True,
                 check=False,
+                timeout=OSASCRIPT_TIMEOUT_SECONDS,
             )
+        except TimeoutExpired as exc:
+            raise MailBridgeError(
+                f"AppleScript '{script_path.name}' timed out after {OSASCRIPT_TIMEOUT_SECONDS} s. Mail may be busy or unresponsive; retry with a narrower mailbox or limit."
+            ) from exc
         except OSError as exc:
             raise MailBridgeError(f"Could not run 'osascript': {exc}. This server requires macOS with osascript available.") from exc
 

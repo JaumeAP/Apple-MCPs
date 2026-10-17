@@ -480,3 +480,31 @@ def test_attachment_separator_cannot_inject_another_path(operation, through_syml
             to=["test@example.com"], cc=None, bcc=None, subject="Test", body="Body",
             attachments=[str(candidate)],
         )
+
+
+def test_safe_manage_blocks_everything_that_sends() -> None:
+    from apple_mail_mcp.permissions import SafetyPolicyError
+
+    settings = Settings(safety_profile=SafetyProfile.SAFE_MANAGE)
+    for call in (
+        lambda: mail_reply_message_tool(FakeBridge(), settings, message_id="id-1", body="x"),
+        lambda: mail_forward_message_tool(FakeBridge(), settings, message_id="id-1", to=["a@example.com"]),
+        lambda: mail_reply_latest_in_thread_tool(FakeBridge(), settings, message_id="id-1", body="x"),
+    ):
+        with pytest.raises(SafetyPolicyError):
+            call()
+
+
+def test_get_thread_without_subject_is_only_the_anchor() -> None:
+    class NoSubjectBridge(FakeBridge):
+        def get_message(self, message_id: str) -> MessageRecord:
+            record = super().get_message(message_id)
+            record.subject = ""
+            return record
+
+        def search_messages(self, *args, **kwargs):
+            raise AssertionError("An empty subject must not widen the thread to the sender's mail")
+
+    thread = mail_get_thread_tool(NoSubjectBridge(), Settings(), message_id="id-1", limit=10)
+
+    assert [item.message_id for item in thread.messages] == ["id-1"]

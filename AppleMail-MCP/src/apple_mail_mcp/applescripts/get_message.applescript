@@ -110,7 +110,7 @@ on run argv
 
         set dateText to ""
         try
-            set dateText to my sanitizeText((date received of targetMessage) as string)
+            set dateText to my sanitizeText((date received of targetMessage) as «class isot» as string)
         end try
 
         set toAddresses to ""

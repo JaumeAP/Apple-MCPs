@@ -231,13 +231,13 @@ on run argv
     end if
 
     tell application "Mail"
-        send forwardMessage
+        set sentOk to send forwardMessage
 
         set subjectText to ""
         try
             set subjectText to my sanitizeText(subject of forwardMessage)
         end try
 
-        return my boolText(true) & fieldSeparator & subjectText & fieldSeparator & resolvedAccountLabel & recordSeparator
+        return my boolText(sentOk is true) & fieldSeparator & subjectText & fieldSeparator & resolvedAccountLabel & recordSeparator
     end tell
 end run
