@@ -6,6 +6,292 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 ## [Unreleased]
 
+## [1.0.5-jap.21] - 2026-10-14 (JaumeAP fork)
+
+### Added
+
+- Files: the allowed folders can come from `~/.config/apple-files-mcp/allowed-roots`
+  (one absolute path or `~/` path per line, `#` starts a comment). When the file
+  exists it wins over `APPLE_FILES_MCP_ALLOWED_ROOTS`; an empty file allows no
+  folder. The directory is outside every path the Claude Code sandbox can write,
+  so only an unsandboxed process edits the list. The server reads it at startup.
+- Files: `apple-files-roots list | add <path> | remove <path>` edits that file.
+
+## [1.0.5-jap.20] - 2026-10-11 (JaumeAP fork)
+
+Applies the two findings that 1.0.5-jap.19 left open.
+
+### Security
+
+- Notes, Messages, Shortcuts: the safety mode defaults to `safe_manage` when
+  `APPLE_*_MCP_SAFETY_MODE` is unset, like the other servers (it was
+  `full_access`). An invalid value still fails closed to `safe_readonly`. The
+  `server.json` defaults, the MCPB manifests (Notes, Messages, Shortcuts and the
+  Apple-Tools bundle) and the READMEs follow. The plugin sets
+  `APPLE_MESSAGES_MCP_SAFETY_MODE=full_access` for apple-messages (Notes and
+  Shortcuts already had it), so the plugin install behaves as before.
+
+### Fixed
+
+- Contacts: a phone query that is a 7+ digit suffix of a stored number only
+  resolves as the same number when the digits in front of it are a country
+  calling code (embedded ITU list, 1 to 3 digits), after dropping a leading `+`
+  or `00`. A different area code or an unassigned prefix no longer resolves as
+  the exact recipient. `+44 ...` and `0044 ...` match the national form with the
+  same trailing digits. A country calling code followed by one `0` trunk digit
+  is also accepted, so a stored `+44 (0)20 7946 0958` matches the bare
+  `20 7946 0958`. A national number written with its own leading `0` (`020 7946
+  0958`, `07911 123456`) matches the `+CC` form without the `(0)` (`+44 20 7946
+  0958`, `0044 20 ...`); the single leading `0` is dropped before comparing. A
+  `+CC`, `00CC` and bare national form of Spanish, UK and US numbers are covered
+  by a both-directions matrix test. Residual risk: an area code that equals a country code
+  (stored `44 5551234`, query `5551234`) still matches.
+
+## [1.0.5-jap.19] - 2026-10-11 (JaumeAP fork)
+
+Fixes from an automated review of 1.0.5-jap.18. Two findings are not applied
+here: the Contacts phone matching and the unset safety-mode default of Notes,
+Messages and Shortcuts, because existing tests and documented behaviour pin the
+current ones.
+
+### Security
+
+- Files: `copy_path`, `create_file` and `move_path` refuse a destination with a
+  hidden path segment below the allowed root, as search already skips them.
+  `copy_path` no longer carries execute permission bits to the copy (files in a
+  copied folder tree included).
+- Files: `move_path` refuses an allowed root, or a folder that contains one
+  (`ROOT_PROTECTED`), like `delete_path`.
+- Files: an `APPLE_FILES_MCP_ALLOWED_ROOTS` value that is set but holds no
+  entry (`,`, ` `) gives no roots instead of the broad default roots, and a
+  relative entry is rejected at start-up instead of being resolved against the
+  working directory. An unset or empty variable keeps the defaults.
+
+### Fixed
+
+- Files: a failed `copy_path` (file or folder) removes the partial destination
+  and returns `COPY_FAILED`, so a retry no longer hits `DESTINATION_EXISTS`.
+- Files: `create_file` treats an empty string on the unused one of `text` and
+  `content_base64` as unset; `text=""` alone still makes an empty file.
+- Calendar, Reminders: a notes or location value that is blank once whitespace
+  and zero-width characters (U+200B-U+200D, U+FEFF) are removed is sent as the
+  empty string, so the native helper and the automation fallback both clear the
+  field. The tool descriptions say so.
+
+## [1.0.5-jap.18] - 2026-10-10 (JaumeAP fork)
+
+Fixes from a `/code-review max` of 1.0.5-jap.12.
+
+### Security
+
+- Notes: `list_folders` reads parent folders again (its handler ran outside the
+  Notes `tell`, so every `parent_folder_id` was null and deleting an allowed
+  folder also deleted blocked subfolders). `create_folder` checks the parent
+  and the new name; `list_folders` and `notes://folders` hide blocked folders.
+  The attachment check looks the note up by id and fails closed.
+- Contacts: a complete email or phone with no exact owner is not found; it no
+  longer resolves to another person's address that contains it. A number
+  without its country code still matches. A phone or email with an empty value
+  is refused, so it cannot replace every method.
+- Reminders, Calendar: ids are trimmed exactly as the Swift helper trims them
+  (including U+200B), and creating a reminder in an unresolved list fails
+  closed. Unscoped `list_reminders` and `reminders://today` query each allowed
+  list and cap after merging.
+- System: `open_application` launches only bundles in `/Applications`,
+  `~/Applications` or the system application folders, by their exact path.
+  `system_health` lists the GUI input tools only when the allow-list is set.
+  The frontmost check does not route keystrokes: they go to whatever holds
+  keyboard focus (documented).
+- Files: `open` refuses `.class`, `.jnlp`, `.term`, scripts whatever their
+  execute bit, and every executable file whatever its type.
+- Apple-Tools: re-exported tools keep their source annotations (destructive
+  hints); `apple_control_frontmost_app` is destructive.
+
+### Fixed
+
+- Calendar, Reminders: an empty notes or location clears it again; an empty
+  `calendar_id` means every calendar or no move.
+- Calendar: occurrence ids use the original occurrence date, so they survive a
+  moved occurrence; a missed occurrence id no longer falls back to automation.
+  A failed or stalled helper compile is not retried in the same process, and a
+  compile timeout no longer falls back to an automation write.
+- Contacts, System: helper compiles use unique temp names, and install errors
+  are structured; Calendar and Maps map install errors too. Contacts no longer
+  suggests a blind retry after a timeout.
+- Shortcuts: iCloud Drive is reachable when a custom root covers it.
+
+## [1.0.5-jap.17] - 2026-10-10 (JaumeAP fork)
+
+### Added
+
+- Files: `files_create_file` creates a new file from `text` (UTF-8) or
+  `content_base64` (binary), up to 10 MB. It never overwrites, needs an existing
+  parent folder, and needs `safe_manage` or `full_access`.
+- Files: `files_copy_path` copies a whole folder tree. The destination must not
+  exist, links inside the tree are copied as links, and a folder cannot be
+  copied into itself.
+- Files: `files_delete_path` takes `recursive` to delete a folder that has
+  content, and everything in it.
+
+### Changed
+
+- Files: `files_delete_path` refuses to delete an allowed root, or a folder that
+  contains one.
+
+## [1.0.5-jap.16] - 2026-10-10 (JaumeAP fork)
+
+### Changed
+
+- Files: the plugin also allows `/Users/jap/projects/contabilitat`, next to the
+  invoices folder, so files can be copied between the two.
+
+## [1.0.5-jap.15] - 2026-10-10 (JaumeAP fork)
+
+### Added
+
+- Files: `files_copy_path` copies a file byte for byte, binary files included,
+  to a new path inside the allowed roots. It never overwrites an existing
+  destination, does not copy folders, and needs `safe_manage` or `full_access`.
+
+## [1.0.5-jap.14] - 2026-10-10 (JaumeAP fork)
+
+### Changed
+
+- Files: the plugin runs apple-files in `full_access` mode, so it can delete,
+  and limits it to the invoices folder `/Users/jap/Documents/_Facturas`
+  instead of the default Desktop, Documents, Downloads and iCloud Drive roots.
+
+## [1.0.5-jap.13] - 2026-10-10 (JaumeAP fork)
+
+### Changed
+
+- The plugin starts the apple-files server again (reverts the removal in
+  1.0.5-jap.10), to test file writes into folders the Bash sandbox denies.
+
+## [1.0.5-jap.12] - 2026-10-10 (JaumeAP fork)
+
+Fixes from a `/code-review max` of the security-audit changes.
+
+### Security
+
+- System: GUI input tools need the target's bundle id in
+  `APPLE_SYSTEM_MCP_GUI_ALLOWED_APPS` (empty by default), always refuse
+  terminals and script-capable apps (Script Editor, Automator, Shortcuts,
+  code editors), and stop with `GUI_TARGET_NOT_FRONTMOST` unless the target
+  is frontmost (keystrokes still go to the focused app; see 1.0.5-jap.18). `open_application`
+  refuses paths and launches by bundle id. Apple-Tools marks the GUI tools
+  destructive.
+- Notes: renaming or retagging a note with attachments is refused; the
+  folder allowlist now covers the `notes://note/` resource, the source folder
+  of moves and updates, and nested folders on delete.
+- Reminders: list deletion refuses calendars that also hold events; the
+  allowlist filters `list_lists` and unscoped `list_reminders`; ids are
+  stripped before checks.
+- Files: `open` refuses `.jar` and network location documents; OS errors are
+  structured. Shortcuts: the `~/Library` rule ignores case, a configured root
+  under `~/Library` lifts it, and option values cannot become options.
+- Calendar, Reminders, Contacts, Mail: an unrecognized safety mode falls back
+  to `safe_readonly`.
+
+### Fixed
+
+- Notes: epochs are formatted without the locale decimal separator (list and
+  get returned invalid JSON on comma-decimal locales); `""` folder ids and
+  titles mean no change; search filters before its cap.
+- Calendar: recurring events get occurrence ids (`<id>@<start>`), and update
+  and delete target that occurrence.
+- Contacts: a complete email or phone resolves to its exact owner and returns
+  the queried value (without an exact owner it fell back to a containing
+  address until 1.0.5-jap.18); updates report `unchanged_fields`.
+- Calendar, Reminders, Maps: helper compiles use unique temp names; a timeout
+  on a change no longer advises a blind retry; empty notes or location mean
+  no change (superseded in 1.0.5-jap.18: an empty notes or location clears the
+  field); a compile timeout falls back to JXA.
+- System: `read_preference_domain` accepts single-segment domains such as
+  `loginwindow`.
+
+## [1.0.5-jap.11] - 2026-10-10 (JaumeAP fork)
+
+### Security
+
+- Reverted 1.0.5-jap.8: the plugin runs apple-system in its default mode
+  again, so the GUI input tools are unavailable. Their terminal deny-list
+  does not stop typed code through Script Editor, Automator or an editor's
+  terminal, and keystrokes go to whatever app is frontmost.
+
+## [1.0.5-jap.10] - 2026-10-10 (JaumeAP fork)
+
+### Security
+
+- The plugin no longer starts the apple-files server. MCP servers run outside
+  the Claude Code Bash sandbox, so apple-files could read folders the sandbox
+  denies (such as `~/Documents`). The `AppleFiles-MCP` package stays in the
+  repository; only the plugin entry is removed.
+
+## [1.0.5-jap.9] - 2026-10-10 (JaumeAP fork)
+
+### Security
+
+- Contacts: with `APPLE_CONTACTS_MCP_BACKUP_DIR` set, a delete whose vCard
+  backup cannot be exported is refused with no change made, instead of
+  keeping only a partial JSON backup. Verified on a real Mac that the vCard
+  export works (the delete backup is a 0600 `.vcf`).
+
+## [1.0.5-jap.8] - 2026-10-10 (JaumeAP fork)
+
+### Changed
+
+- The plugin runs apple-system with `APPLE_SYSTEM_MCP_SAFETY_MODE=full_access`,
+  so the GUI input tools (type, press keys, click) are available again. They
+  still need a named target application and refuse terminal apps.
+
+## [1.0.5-jap.7] - 2026-10-10 (JaumeAP fork)
+
+### Security
+
+- Notes: create-timeout recovery never adopts a same-title note whose
+  creation time is unknown or earlier than the create call.
+- Contacts: backup files are created 0600 in a new 0700 directory.
+
+### Fixed
+
+- Calendar and Reminders helper: an attendee without a URL no longer
+  crashes the helper. Update and delete descriptions say that native access
+  changes only this occurrence of a recurring event.
+
+## [1.0.5-jap.6] - 2026-10-10 (JaumeAP fork)
+
+### Security
+
+- Calendar: the JXA fallback ends osascript options with `--`, so an id
+  starting with `-e` is data, not code.
+- Shortcuts: `input_paths` and `output_path` are confined to allowed roots
+  (`APPLE_SHORTCUTS_MCP_ALLOWED_ROOTS`), hidden paths and `~/Library` are
+  refused, an existing output is never overwritten, and names follow `--`.
+- System: GUI input tools (type, press keys, click) need `full_access`, a
+  named target application, and refuse terminal apps; they are marked
+  destructive. `read_preference_domain` accepts domain names only, not paths.
+- Files: move never overwrites; `recent_files` parses NUL-separated output
+  and re-checks containment; `open` refuses executables, aliases and
+  `.webloc`-style redirects; text reads are capped at 1 MB and need a
+  regular file.
+- Reminders: deleting a list applies the allowlist and refuses event
+  calendars and read-only lists (also in the Calendar copy of the helper);
+  moves and `reminders://` resources honor the allowlist.
+- Notes, Messages, Shortcuts: an unrecognized safety mode falls back to
+  `safe_readonly` instead of `full_access`.
+- Notes: a rename with an empty body keeps the body; append refuses notes
+  with attachments; the folder allowlist fails closed; deleting a folder
+  needs `full_access`; the bulk list re-checks ids against concurrent edits.
+- Contacts: empty phone or email lists no longer erase a contact's methods;
+  recipient resolution returns `AMBIGUOUS_CONTACT` for any name with more
+  than one match.
+- Messages: LIKE wildcards are escaped and read limits are capped at 500.
+- Common: `require_loopback_host` accepts only `127.0.0.1`, `::1` and
+  `localhost`.
+- Calendar, Reminders, Maps: helper calls and the Swift compile have
+  timeouts, and the compile writes a temp file then renames it into place.
+
 ## [1.0.5] - 2026-09-25
 
 ### Security
