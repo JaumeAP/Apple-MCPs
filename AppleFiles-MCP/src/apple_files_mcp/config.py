@@ -37,15 +37,39 @@ def _default_roots() -> tuple[Path, ...]:
     return tuple(existing or [home / "Downloads"])
 
 
+def roots_file() -> Path:
+    return Path.home() / ".config" / "apple-files-mcp" / "allowed-roots"
+
+
+def _roots_value(env_value: str | None) -> str | None:
+    # The roots file wins over the environment variable. Its directory is outside every
+    # path the Claude Code sandbox may write, so only an unsandboxed process edits the list.
+    path = roots_file()
+    if not path.is_file():
+        return env_value
+    lines = (line.split("#", 1)[0].strip() for line in path.read_text().splitlines())
+    # An empty file fails closed with no roots, like a blank variable.
+    return ",".join(line for line in lines if line) or ","
+
+
 def _parse_roots(value: str | None) -> tuple[Path, ...]:
+    # Unset, or an empty string that some clients pass for an optional variable: the defaults.
     if not value:
         return _default_roots()
     roots = []
     for raw in value.split(","):
-        path = Path(raw.strip()).expanduser()
-        if raw.strip():
-            roots.append(path)
-    return tuple(roots) or _default_roots()
+        entry = raw.strip()
+        if not entry:
+            continue
+        path = Path(entry).expanduser()
+        if not path.is_absolute():
+            raise ValueError(
+                f"APPLE_FILES_MCP_ALLOWED_ROOTS entry {entry!r} is not an absolute path; "
+                "use absolute paths or ~/ prefixes."
+            )
+        roots.append(path)
+    # Set but blank (',', ' '): fail closed with no roots, never the broad defaults.
+    return tuple(roots)
 
 
 @lru_cache(maxsize=1)
@@ -54,7 +78,7 @@ def load_settings() -> Settings:
         server_name="Apple Files MCP",
         version="1.0.5",
         safety_mode=os.environ.get("APPLE_FILES_MCP_SAFETY_MODE", "safe_manage").strip().lower() or "safe_manage",
-        allowed_roots=_parse_roots(os.environ.get("APPLE_FILES_MCP_ALLOWED_ROOTS")),
+        allowed_roots=_parse_roots(_roots_value(os.environ.get("APPLE_FILES_MCP_ALLOWED_ROOTS"))),
         transport=os.environ.get("APPLE_FILES_MCP_TRANSPORT", "stdio").strip().lower() or "stdio",
         host=os.environ.get("APPLE_FILES_MCP_HOST", "127.0.0.1"),
         port=_parse_int(os.environ.get("APPLE_FILES_MCP_PORT"), 8000),

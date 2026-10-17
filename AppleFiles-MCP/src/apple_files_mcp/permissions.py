@@ -27,7 +27,9 @@ READ_ONLY_ACTIONS = {
 
 MANAGE_ACTIONS = {
     "files_create_folder",
+    "files_create_file",
     "files_move_path",
+    "files_copy_path",
     "files_open_path",
     "files_reveal_in_finder",
     "files_set_tags",

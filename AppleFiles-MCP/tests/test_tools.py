@@ -63,7 +63,13 @@ class StubBridge:
     def move_path(self, source: str, destination: str):
         return source, destination
 
-    def delete_path(self, path: str):
+    def copy_path(self, source: str, destination: str):
+        return source, destination
+
+    def create_file(self, path: str, text: str | None = None, content_base64: str | None = None):
+        return path
+
+    def delete_path(self, path: str, recursive: bool = False):
         return path
 
 
@@ -89,7 +95,9 @@ def test_files_health_respects_safety_mode(monkeypatch):
     manage = tools.files_health()
 
     assert "create_folder" in manage.capabilities
+    assert "create_file" in manage.capabilities
     assert "move_path" in manage.capabilities
+    assert "copy_path" in manage.capabilities
     assert "open_path" in manage.capabilities
     assert "set_tags" in manage.capabilities
     assert "delete_path" not in manage.capabilities
@@ -107,6 +115,18 @@ def test_files_read_text_file(monkeypatch):
     result = tools.files_read_text_file("/Users/test/Downloads/a.txt")
     assert result.ok is True
     assert result.text == "hello"
+
+
+def test_files_tool_maps_os_error(monkeypatch):
+    class DeniedBridge(StubBridge):
+        def read_text_file(self, path: str, max_bytes: int = 100_000):
+            raise PermissionError(13, "Permission denied", path)
+
+    monkeypatch.setattr(tools, "_bridge", lambda: DeniedBridge())
+    result = tools.files_read_text_file("/Users/test/Downloads/a.txt")
+    assert result.ok is False
+    assert result.error.error_code == "FILE_SYSTEM_ERROR"
+    assert "Permission denied" in result.error.message
 
 
 def test_files_search_files(monkeypatch):
@@ -150,6 +170,67 @@ def test_files_open_and_recent_locations(monkeypatch):
     assert locations.ok is True
     assert locations.count == 1
     assert locations.locations[0].is_directory is True
+
+
+def test_files_copy_path_respects_safety_mode(monkeypatch):
+    monkeypatch.setattr(tools, "_bridge", lambda: StubBridge())
+    monkeypatch.setenv("APPLE_FILES_MCP_SAFETY_MODE", "safe_readonly")
+    tools.load_settings.cache_clear()
+
+    denied = asyncio.run(tools.files_copy_path("/Users/test/Downloads/a.txt", "/Users/test/Downloads/b.txt", None))
+
+    monkeypatch.setenv("APPLE_FILES_MCP_SAFETY_MODE", "safe_manage")
+    tools.load_settings.cache_clear()
+    monkeypatch.setattr(tools, "notify_resources_changed", lambda ctx: asyncio.sleep(0))
+
+    copied = asyncio.run(tools.files_copy_path("/Users/test/Downloads/a.txt", "/Users/test/Downloads/b.txt", None))
+
+    assert denied.ok is False
+    assert denied.error.error_code == "SAFETY_RESTRICTION"
+    assert copied.ok is True
+    assert copied.action == "copied"
+    assert copied.destination == "/Users/test/Downloads/b.txt"
+
+
+def test_files_create_file_and_recursive_delete_respect_safety_mode(monkeypatch):
+    seen = {}
+
+    class RecordingBridge(StubBridge):
+        def create_file(self, path: str, text: str | None = None, content_base64: str | None = None):
+            seen["create"] = (path, text, content_base64)
+            return path
+
+        def delete_path(self, path: str, recursive: bool = False):
+            seen["delete"] = (path, recursive)
+            return path
+
+    monkeypatch.setattr(tools, "_bridge", lambda: RecordingBridge())
+    monkeypatch.setattr(tools, "notify_resources_changed", lambda ctx: asyncio.sleep(0))
+    monkeypatch.setenv("APPLE_FILES_MCP_SAFETY_MODE", "safe_readonly")
+    tools.load_settings.cache_clear()
+
+    denied = asyncio.run(tools.files_create_file("/Users/test/Downloads/a.txt", None, text="hi"))
+
+    monkeypatch.setenv("APPLE_FILES_MCP_SAFETY_MODE", "safe_manage")
+    tools.load_settings.cache_clear()
+
+    created = asyncio.run(tools.files_create_file("/Users/test/Downloads/a.txt", None, text="hi"))
+    delete_denied = asyncio.run(tools.files_delete_path("/Users/test/Downloads/old", None, recursive=True))
+
+    monkeypatch.setenv("APPLE_FILES_MCP_SAFETY_MODE", "full_access")
+    tools.load_settings.cache_clear()
+
+    deleted = asyncio.run(tools.files_delete_path("/Users/test/Downloads/old", None, recursive=True))
+
+    assert denied.ok is False
+    assert denied.error.error_code == "SAFETY_RESTRICTION"
+    assert created.ok is True
+    assert created.action == "created"
+    assert seen["create"] == ("/Users/test/Downloads/a.txt", "hi", None)
+    assert delete_denied.ok is False
+    assert deleted.ok is True
+    assert deleted.action == "deleted"
+    assert seen["delete"] == ("/Users/test/Downloads/old", True)
 
 
 def test_main_uses_streamable_http(monkeypatch):
