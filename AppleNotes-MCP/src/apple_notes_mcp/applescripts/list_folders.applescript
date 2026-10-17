@@ -29,21 +29,25 @@ on folder_json(accountId, accountName, fld)
 	set sharedValue to false
 	set parentFolderId to ""
 	set parentFolderName to ""
-	try
-		set folderId to my safe_text(id of fld)
-	end try
-	try
-		set folderName to my safe_text(name of fld)
-	end try
-	try
-		set sharedValue to shared of fld
-	end try
-	try
-		if class of container of fld is folder then
-			set parentFolderId to my safe_text(id of container of fld)
-			set parentFolderName to my safe_text(name of container of fld)
-		end if
-	end try
+	-- Inside the Notes tell so `container`, `shared` and `folder` compile as
+	-- Notes terms; outside it they are plain identifiers and silently fail.
+	tell application "Notes"
+		try
+			set folderId to my safe_text(id of fld)
+		end try
+		try
+			set folderName to my safe_text(name of fld)
+		end try
+		try
+			set sharedValue to shared of fld
+		end try
+		try
+			if class of container of fld is folder then
+				set parentFolderId to my safe_text(id of container of fld)
+				set parentFolderName to my safe_text(name of container of fld)
+			end if
+		end try
+	end tell
 	return "{" & ¬
 		quote & "folder_id" & quote & ":" & my json_string(folderId) & "," & ¬
 		quote & "name" & quote & ":" & my json_string(folderName) & "," & ¬

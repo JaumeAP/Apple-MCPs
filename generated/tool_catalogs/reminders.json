@@ -406,7 +406,7 @@
         "remind_at: string (optional)",
         "priority: integer (optional)"
       ],
-      "description": "Update one or more fields on an existing reminder.",
+      "description": "Update one or more fields on an existing reminder. An empty list_id leaves the list unchanged; an empty or blank (only whitespace or zero-width characters) notes clears the notes.",
       "domain": "reminders",
       "example_calls": [
         {
@@ -432,10 +432,19 @@
         "more",
         "fields",
         "field",
-        "existing"
+        "existing",
+        "empty",
+        "leaves",
+        "leav",
+        "unchanged",
+        "blank",
+        "only",
+        "whitespace",
+        "zero",
+        "width"
       ],
       "title": "Update Reminder",
-      "usage_intent": "Update one or more fields on an existing reminder."
+      "usage_intent": "Update one or more fields on an existing reminder. An empty list_id leaves the list unchanged; an empty or blank (only whitespace or zero-width characters) notes clears the notes."
     },
     {
       "aliases": [

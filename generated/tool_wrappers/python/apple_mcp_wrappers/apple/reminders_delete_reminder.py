@@ -11,7 +11,7 @@ async def reminders_delete_reminder(
 ) -> Any:
     """Reminders Delete Reminder
 
-    Delegated Apple domain tool 'reminders_delete_reminder' exposed through Apple-Tools-MCP.
+    Delete a reminder by reminder_id.
 
     Example:
         await reminders_delete_reminder(client, reminder_id='example_reminder_id')

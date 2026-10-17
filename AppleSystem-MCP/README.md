@@ -129,7 +129,26 @@ The launch System write surface is explicit, not generic:
 - `system_set_increase_contrast`
 - `system_set_reduce_transparency`
 
-The bounded GUI fallback surface is:
+The bounded GUI fallback surface is below. Only `system_gui_list_menu_bar_items`
+runs under `safe_manage`; the tools that click or type need `full_access`, a named
+`application` or `bundle_id` (never the frontmost app implicitly), and a target whose
+bundle id is listed in `APPLE_SYSTEM_MCP_GUI_ALLOWED_APPS` (comma-separated, for example
+`com.apple.TextEdit,com.apple.Notes`). The list is empty by default, so every GUI input is
+refused until you add the apps you want to drive. Terminals and apps that run typed code
+(Terminal, iTerm2, Warp, Ghostty, kitty, Alacritty, WezTerm, Hyper, Rio, Tabby, Script
+Editor, Automator, Shortcuts, Xcode, VS Code, Cursor, Zed) are always refused, even when
+listed. Before sending input, the server brings the target to the front and aborts with
+`GUI_TARGET_NOT_FRONTMOST` unless it is the frontmost app, so background-only apps cannot
+receive GUI input. Keystrokes still go to whatever holds keyboard focus: a non-activating
+panel such as Spotlight, a global hotkey, or a focus change during the input can receive
+them while the target stays frontmost. `system_health` lists the input tools only when the
+allow-list is set.
+
+`system_open_application` takes an application name or bundle id, never a path. Launch
+Services resolves it to an installed bundle, and only a bundle in `/Applications`,
+`~/Applications` or the system application folders is launched, by its exact path; build
+products, Downloads and other registered copies elsewhere are refused with
+`APPLICATION_NOT_TRUSTED`.
 
 - `system_gui_list_menu_bar_items`
 - `system_gui_click_menu_path`

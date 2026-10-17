@@ -15,7 +15,7 @@ async def shortcuts_run_shortcut(
 ) -> Any:
     """Shortcuts Run Shortcut
 
-    Delegated Apple domain tool 'shortcuts_run_shortcut' exposed through Apple-Tools-MCP.
+    Run a shortcut by name or identifier with optional input and output arguments.
 
     Example:
         await shortcuts_run_shortcut(client, shortcut_name_or_identifier='example_shortcut_name_or_identifier', input_paths=[])

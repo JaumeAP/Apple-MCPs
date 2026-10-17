@@ -414,8 +414,48 @@ struct ApplePIMBridge {
         return Array(events)
     }
 
+    // Every occurrence of a recurring series shares one calendarItemIdentifier,
+    // so the emitted id appends the occurrence's original date
+    // ("<id>@<ISO occurrenceDate>") to address that occurrence alone. The
+    // original date stays fixed when the occurrence is moved, and no two
+    // occurrences share it. Non-recurring events keep the bare id.
+    static func eventID(_ event: EKEvent) -> String {
+        guard event.hasRecurrenceRules || event.isDetached else {
+            return event.calendarItemIdentifier
+        }
+        return "\(event.calendarItemIdentifier)@\(isoString(event.occurrenceDate ?? event.startDate))"
+    }
+
+    // Resolves an occurrence id from `eventID(_:)`. A bare id (older clients,
+    // non-recurring events) resolves to the first occurrence of a series.
+    static func resolveEvent(store: EKEventStore, eventID: String) -> EKEvent? {
+        if let separator = eventID.lastIndex(of: "@"),
+           let occurrence = isoFormatter.date(from: String(eventID[eventID.index(after: separator)...])) {
+            let baseID = String(eventID[..<separator])
+            guard let series = store.calendarItem(withIdentifier: baseID) as? EKEvent else {
+                return nil
+            }
+            func find(from start: Date, to end: Date) -> EKEvent? {
+                let predicate = store.predicateForEvents(withStart: start, end: end, calendars: [series.calendar])
+                return store.events(matching: predicate).first {
+                    $0.calendarItemIdentifier == baseID
+                        && abs(($0.occurrenceDate ?? $0.startDate).timeIntervalSince(occurrence)) < 1
+                }
+            }
+            // An unmoved occurrence starts at its original date; a moved one is
+            // searched for within a year either side.
+            // ponytail: an occurrence moved more than a year away is not found.
+            let year: TimeInterval = 366 * 24 * 3600
+            return find(from: occurrence, to: occurrence.addingTimeInterval(1))
+                ?? find(from: occurrence.addingTimeInterval(-year), to: occurrence.addingTimeInterval(year))
+        }
+        // Emitted ids are calendarItemIdentifier values; eventIdentifier is
+        // still accepted for ids stored by earlier versions.
+        return store.calendarItem(withIdentifier: eventID) as? EKEvent ?? store.event(withIdentifier: eventID)
+    }
+
     static func getEvent(store: EKEventStore, eventID: String) throws -> EventRecord {
-        guard let event = store.event(withIdentifier: eventID) else {
+        guard let event = resolveEvent(store: store, eventID: eventID) else {
             throw BridgeFailure(
                 errorCode: "EVENT_NOT_FOUND",
                 message: "No event matched '\(eventID)'.",
@@ -433,7 +473,7 @@ struct ApplePIMBridge {
             if eventID.hasPrefix("applescript::") || eventID.hasPrefix("uid:") {
                 return BatchEventRecord(event_id: eventID, found: false, event: nil, error_code: "UNSUPPORTED_IDENTIFIER")
             }
-            guard let event = store.event(withIdentifier: eventID) else {
+            guard let event = resolveEvent(store: store, eventID: eventID) else {
                 return BatchEventRecord(
                     event_id: eventID,
                     found: false,
@@ -475,7 +515,7 @@ struct ApplePIMBridge {
     }
 
     static func updateEvent(store: EKEventStore, eventID: String, payload: [String: Any]) throws -> EventRecord {
-        guard let event = store.event(withIdentifier: eventID) else {
+        guard let event = resolveEvent(store: store, eventID: eventID) else {
             throw BridgeFailure(
                 errorCode: "EVENT_NOT_FOUND",
                 message: "No event matched '\(eventID)'.",
@@ -495,13 +535,16 @@ struct ApplePIMBridge {
     }
 
     static func deleteEvent(store: EKEventStore, eventID: String) throws -> BooleanMutationPayload {
-        guard let event = store.event(withIdentifier: eventID) else {
+        guard let event = resolveEvent(store: store, eventID: eventID) else {
             throw BridgeFailure(
                 errorCode: "EVENT_NOT_FOUND",
                 message: "No event matched '\(eventID)'.",
                 suggestion: "List calendar events first to discover valid ids."
             )
         }
+        // No tool exposes a series option: `.thisEvent` never touches other
+        // occurrences of a recurring event. Which occurrence is removed depends
+        // on the id: see `resolveEvent`.
         try store.remove(event, span: .thisEvent, commit: true)
         return BooleanMutationPayload(deleted: true, object_id: eventID)
     }
@@ -642,7 +685,7 @@ struct ApplePIMBridge {
         let recurrence = event.recurrenceRules?.first.map(recurrenceInfo)
         let attendeeList = event.attendees?.map(attendeeInfo)
         return EventRecord(
-            event_id: event.calendarItemIdentifier,
+            event_id: eventID(event),
             title: event.title,
             calendar_id: event.calendar.calendarIdentifier,
             calendar_name: event.calendar.title,
@@ -678,9 +721,12 @@ struct ApplePIMBridge {
         case .pending: status = "pending"
         default: status = "unknown"
         }
+        // `url` is imported as non-optional, but EventKit can return nil for
+        // some attendees; reading it directly would trap. Read it via KVC.
+        let url = participant.value(forKey: "URL") as? URL
         return AttendeeInfo(
             name: participant.name,
-            email: participant.url.absoluteString.replacingOccurrences(of: "mailto:", with: ""),
+            email: url?.absoluteString.replacingOccurrences(of: "mailto:", with: ""),
             status: status
         )
     }
@@ -1142,6 +1188,23 @@ struct ApplePIMBridge {
     static func deleteReminderList(store: EKEventStore, listID: String) throws -> BooleanMutationPayload {
         guard let calendar = store.calendar(withIdentifier: listID) else {
             return BooleanMutationPayload(deleted: false, object_id: listID)
+        }
+        // Calendar identifiers are shared between event calendars and reminder
+        // lists: never remove an event calendar (and its events) from here,
+        // including a mixed calendar that holds both events and reminders.
+        guard calendar.allowedEntityTypes.contains(.reminder), !calendar.allowedEntityTypes.contains(.event) else {
+            throw BridgeFailure(
+                errorCode: "LIST_NOT_FOUND",
+                message: "No reminder list matched '\(listID)'.",
+                suggestion: "List reminder lists first to discover valid ids."
+            )
+        }
+        guard calendar.allowsContentModifications else {
+            throw BridgeFailure(
+                errorCode: "LIST_READ_ONLY",
+                message: "Reminder list '\(calendar.title)' does not allow modifications.",
+                suggestion: "Choose a reminder list that allows modifications."
+            )
         }
         try store.removeCalendar(calendar, commit: true)
         return BooleanMutationPayload(deleted: true, object_id: listID)

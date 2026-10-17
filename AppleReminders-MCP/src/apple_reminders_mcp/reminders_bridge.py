@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
+import uuid
 from pathlib import Path
 
+from apple_mcp_common.runtime import clear_if_blank
 from apple_reminders_mcp.config import load_settings
 from apple_reminders_mcp.models import (
     DeleteReminderListResponse,
@@ -12,6 +15,9 @@ from apple_reminders_mcp.models import (
     ReminderListMutationResponse,
     ReminderSummary,
 )
+
+# Helper commands that change Reminders data: a timeout leaves their outcome unknown.
+_MUTATING_COMMAND_PREFIXES = ("create-", "update-", "set-", "delete-")
 
 
 class RemindersBridgeError(Exception):
@@ -23,6 +29,10 @@ class RemindersBridgeError(Exception):
 
 
 class RemindersBridge:
+    # A stalled EventKit or iCloud sync must not hang the stdio server forever.
+    _HELPER_TIMEOUT_SECONDS = 60
+    _COMPILE_TIMEOUT_SECONDS = 300
+
     def __init__(self, helper_source: Path, helper_binary: Path) -> None:
         self.helper_source = helper_source
         self.helper_binary = helper_binary
@@ -76,7 +86,7 @@ class RemindersBridge:
         parent_reminder_id: str | None = None,
         tags: list[str] | None = None,
     ) -> ReminderDetail:
-        combined_notes = notes or ""
+        combined_notes = clear_if_blank(notes) or ""
         if tags:
             tag_str = " ".join(f"#{t.lstrip('#')}" for t in tags)
             combined_notes = f"{combined_notes}\n\n{tag_str}".strip()
@@ -110,6 +120,9 @@ class RemindersBridge:
         parent_reminder_id: str | None = None,
         tags: list[str] | None = None,
     ) -> ReminderDetail:
+        # An empty string clears the notes, and None means "no change". A blank
+        # value is sent as the explicit empty string.
+        notes = clear_if_blank(notes)
         request: dict[str, object] = {}
         if title is not None:
             request["title"] = title
@@ -163,7 +176,21 @@ class RemindersBridge:
                 capture_output=True,
                 text=True,
                 check=False,
+                timeout=self._HELPER_TIMEOUT_SECONDS,
             )
+        except subprocess.TimeoutExpired as exc:
+            message = f"Native helper '{command}' did not finish within {self._HELPER_TIMEOUT_SECONDS} seconds."
+            if command.startswith(_MUTATING_COMMAND_PREFIXES):
+                raise RemindersBridgeError(
+                    "HELPER_TIMEOUT",
+                    f"{message} The change may or may not have been applied.",
+                    "List or get the reminder or list to check its current state before retrying.",
+                ) from exc
+            raise RemindersBridgeError(
+                "HELPER_TIMEOUT",
+                message,
+                "Check that Reminders and iCloud sync are responsive, then retry.",
+            ) from exc
         except OSError as exc:
             raise RemindersBridgeError(
                 "HELPER_UNAVAILABLE",
@@ -205,20 +232,44 @@ class RemindersBridge:
             return
 
         self.helper_binary.parent.mkdir(parents=True, exist_ok=True)
+        # Compile next to the target and swap it in atomically, so a concurrent
+        # caller never runs a half-written binary.
+        # A per-call name: the pid is shared by every thread of this server.
+        temporary_binary = self.helper_binary.with_name(f"{self.helper_binary.name}.{uuid.uuid4().hex}.tmp")
         try:
             completed = subprocess.run(
-                ["swiftc", "-parse-as-library", "-O", str(self.helper_source), "-o", str(self.helper_binary)],
+                ["swiftc", "-parse-as-library", "-O", str(self.helper_source), "-o", str(temporary_binary)],
                 capture_output=True,
                 text=True,
                 check=False,
+                timeout=self._COMPILE_TIMEOUT_SECONDS,
             )
+        except subprocess.TimeoutExpired as exc:
+            temporary_binary.unlink(missing_ok=True)
+            raise RemindersBridgeError(
+                "HELPER_COMPILE_TIMEOUT",
+                f"Compiling the native helper did not finish within {self._COMPILE_TIMEOUT_SECONDS} seconds.",
+                "Confirm Xcode command line tools and Swift are available, then retry.",
+            ) from exc
         except OSError as exc:
+            temporary_binary.unlink(missing_ok=True)
             raise RemindersBridgeError(
                 "SWIFTC_UNAVAILABLE",
                 f"Could not run 'swiftc': {exc}.",
                 "This server requires macOS with the Swift toolchain (swiftc) available.",
             ) from exc
-        if completed.returncode != 0:
+        if completed.returncode == 0:
+            try:
+                os.replace(temporary_binary, self.helper_binary)
+            except OSError as exc:
+                temporary_binary.unlink(missing_ok=True)
+                raise RemindersBridgeError(
+                    "HELPER_COMPILE_FAILED",
+                    f"Could not install the compiled native helper: {exc}.",
+                    "Retry the request.",
+                ) from exc
+        else:
+            temporary_binary.unlink(missing_ok=True)
             raise RemindersBridgeError(
                 "HELPER_COMPILE_FAILED",
                 completed.stderr.strip() or completed.stdout.strip() or "Failed to compile the native helper.",

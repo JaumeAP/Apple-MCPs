@@ -10,7 +10,7 @@ async def system_get_focus_status(
 ) -> Any:
     """System Get Focus Status
 
-    Delegated Apple domain tool 'system_get_focus_status' exposed through Apple-Tools-MCP.
+    Return truthful Focus support metadata and the best available current Focus state.
 
     Example:
         await system_get_focus_status(client)

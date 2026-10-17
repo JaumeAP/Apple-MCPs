@@ -1,22 +1,54 @@
 from __future__ import annotations
 
-import ipaddress
 from typing import Any
 
 from mcp_types.version import MODERN_PROTOCOL_VERSIONS
 
+CANONICAL_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+
+# Exactly Foundation's CharacterSet.whitespacesAndNewlines (enumerated with
+# swiftc on macOS 26). It differs from str.strip(): it trims U+200B and keeps
+# U+001C-U+001F.
+SWIFT_WHITESPACE = "".join(
+    map(chr, (0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x20, 0x85, 0xA0, 0x1680, *range(0x2000, 0x200C), 0x2028, 0x2029, 0x202F, 0x205F, 0x3000))
+)
+
+
+def swift_trim(value: str) -> str:
+    """Trim the way the Swift helpers trim ids and strings.
+
+    Python must see the same id the helper will act on: an allowlist lookup on
+    an id the helper later trims differently is an allowlist bypass.
+    """
+    return value.strip(SWIFT_WHITESPACE)
+
+
+ZERO_WIDTH = "​‌‍﻿"
+
+
+def clear_if_blank(value: str | None) -> str | None:
+    """Return "" for a value that is blank once whitespace and zero-width characters go.
+
+    A notes or location field set to such a value clears the field. Sending the
+    explicit empty string makes the native helper and the automation fallback
+    agree, instead of the fallback storing an invisible value. None stays None
+    (no change); any other value is returned untouched.
+    """
+    if value is not None and not value.strip(SWIFT_WHITESPACE + ZERO_WIDTH):
+        return ""
+    return value
+
 
 def require_loopback_host(host: str) -> str:
-    """Return a normalized loopback HTTP host or reject network exposure."""
-    normalized = host.strip()
-    if normalized.lower() == "localhost":
-        return normalized
-    try:
-        address = ipaddress.ip_address(normalized)
-    except ValueError as exc:
-        raise ValueError(f"Streamable HTTP host must be a loopback address, got {host!r}") from exc
-    if not address.is_loopback:
-        raise ValueError(f"Streamable HTTP host must be a loopback address, got {host!r}")
+    """Return a canonical loopback HTTP host or reject it.
+
+    Only the spellings the MCP SDK recognises for its DNS-rebinding guard are
+    accepted; other loopback forms (127.1, ::ffff:127.0.0.1, ...) would bind
+    locally but silently disable that guard.
+    """
+    normalized = host.strip().lower()
+    if normalized not in CANONICAL_LOOPBACK_HOSTS:
+        raise ValueError(f"Streamable HTTP host must be a loopback address (127.0.0.1, ::1 or localhost), got {host!r}")
     return normalized
 
 

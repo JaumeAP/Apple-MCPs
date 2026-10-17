@@ -11,7 +11,7 @@ async def reminders_get_reminder(
 ) -> Any:
     """Reminders Get Reminder
 
-    Delegated Apple domain tool 'reminders_get_reminder' exposed through Apple-Tools-MCP.
+    Fetch full details for a reminder by reminder_id.
 
     Example:
         await reminders_get_reminder(client, reminder_id='example_reminder_id')

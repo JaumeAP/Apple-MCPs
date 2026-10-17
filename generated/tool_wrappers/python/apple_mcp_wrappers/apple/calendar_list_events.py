@@ -14,7 +14,7 @@ async def calendar_list_events(
 ) -> Any:
     """Calendar List Events
 
-    Delegated Apple domain tool 'calendar_list_events' exposed through Apple-Tools-MCP.
+    List calendar events in a time window, optionally filtered to one calendar.
 
     Example:
         await calendar_list_events(client, start_iso='2026-04-07T18:00:00', end_iso='2026-04-07T18:00:00')

@@ -543,6 +543,48 @@ def _run_jxa_update_in_node(script: str, event_id: str, fields_json: str) -> dic
     return json.loads(completed.stdout.strip())
 
 
+@pytest.mark.parametrize("blank", ["", "   ", "​", " ​‌‍﻿\n"])
+def test_blank_notes_and_location_are_sent_as_the_empty_string_on_both_paths(monkeypatch, blank) -> None:
+    bridge = CalendarBridge(Path("/tmp/source.swift"), Path("/tmp/helper"))
+    monkeypatch.setattr(bridge, "_normalize_detail", lambda payload, **kwargs: payload)
+    native: list[dict[str, object]] = []
+    fallback: list[tuple[object, object]] = []
+
+    def fake_run_helper(command: str, *args: str) -> dict[str, object]:
+        native.append(json.loads(args[-1]))
+        return {}
+
+    def fake_fallback(event_id, **fields):
+        fallback.append((fields["notes"], fields["location"]))
+        return {}
+
+    monkeypatch.setattr(bridge, "_run_helper", fake_run_helper)
+    monkeypatch.setattr(bridge, "_fallback_update_event", fake_fallback)
+
+    bridge.update_event("event-1", notes=blank, location=blank)
+    bridge.update_event("applescript::v2::%7B", notes=blank, location=blank)
+
+    assert native == [{"notes": "", "location": ""}]
+    assert fallback == [("", "")]
+
+
+def test_update_event_keeps_none_and_real_text_for_notes_and_location(monkeypatch) -> None:
+    bridge = CalendarBridge(Path("/tmp/source.swift"), Path("/tmp/helper"))
+    monkeypatch.setattr(bridge, "_normalize_detail", lambda payload, **kwargs: payload)
+    native: list[dict[str, object]] = []
+
+    def fake_run_helper(command: str, *args: str) -> dict[str, object]:
+        native.append(json.loads(args[-1]))
+        return {}
+
+    monkeypatch.setattr(bridge, "_run_helper", fake_run_helper)
+
+    bridge.update_event("event-1", title="T")
+    bridge.update_event("event-1", notes=" keep ​", location="Room 1")
+
+    assert native == [{"title": "T"}, {"notes": " keep ​", "location": "Room 1"}]
+
+
 def test_update_event_fallback_moves_event_later_without_invalid_intermediate_state(monkeypatch) -> None:
     # The reproduced bug: the new start (17:00) is after the OLD end (14:30).
     bridge = CalendarBridge(Path("/tmp/source.swift"), Path("/tmp/helper"))
@@ -1298,3 +1340,141 @@ def test_run_jxa_applies_default_timeout_so_fallbacks_cannot_hang(monkeypatch):
 
     assert timeouts == [CalendarBridge._JXA_TIMEOUT_SECONDS] * 2
     assert CalendarBridge._JXA_TIMEOUT_SECONDS == 30
+
+
+def test_run_jxa_ends_options_before_caller_arguments(monkeypatch):
+    # An id starting with "-e" must reach the script as argv, never as an extra osascript script line.
+    bridge = CalendarBridge(Path("/tmp/source.swift"), Path("/tmp/helper"))
+    commands = []
+
+    def fake_run(command, **kwargs):
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 0, stdout="{}", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    hostile = "-eObjC.import('stdlib');$.system('id')"
+
+    bridge._run_jxa("generated script", hostile)
+
+    assert commands == [["osascript", "-l", "JavaScript", "-e", "generated script", "--", hostile]]
+
+
+def test_run_helper_times_out_instead_of_hanging(monkeypatch):
+    bridge = CalendarBridge(Path("/tmp/source.swift"), Path("/tmp/helper"))
+    monkeypatch.setattr(bridge, "_ensure_helper", lambda: None)
+    timeouts = []
+
+    def stalled(command, **kwargs):
+        timeouts.append(kwargs.get("timeout"))
+        raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+
+    monkeypatch.setattr(subprocess, "run", stalled)
+
+    with pytest.raises(CalendarBridgeError) as failure:
+        bridge._run_helper("list-calendars")
+
+    assert failure.value.error_code == "HELPER_TIMEOUT"
+    assert timeouts == [CalendarBridge._HELPER_TIMEOUT_SECONDS]
+
+
+def test_mutation_timeout_does_not_suggest_a_blind_retry(monkeypatch):
+    bridge = CalendarBridge(Path("/tmp/source.swift"), Path("/tmp/helper"))
+    monkeypatch.setattr(bridge, "_ensure_helper", lambda: None)
+
+    def stalled(command, **kwargs):
+        raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+
+    monkeypatch.setattr(subprocess, "run", stalled)
+
+    with pytest.raises(CalendarBridgeError) as failure:
+        bridge.delete_event("native-1")
+
+    assert failure.value.error_code == "HELPER_TIMEOUT"
+    assert "may or may not have been applied" in failure.value.message
+    assert "before retrying" in failure.value.suggestion
+
+
+def test_helper_compile_timeout_falls_back_for_reads_but_not_writes(monkeypatch):
+    # A JXA write minutes after the client gave up would be duplicated by its retry.
+    bridge = CalendarBridge(Path("/tmp/source.swift"), Path("/tmp/helper"))
+
+    def compile_timeout(command: str, *args: str) -> dict[str, object]:
+        raise CalendarBridgeError("HELPER_COMPILE_TIMEOUT", "slow")
+
+    monkeypatch.setattr(bridge, "_run_helper", compile_timeout)
+    monkeypatch.setattr(bridge, "_fallback_delete_event", lambda event_id: {"deleted": True})
+    monkeypatch.setattr(bridge, "_fallback_get_event", lambda event_id: {"event_id": event_id, "title": "Read"})
+
+    with pytest.raises(CalendarBridgeError) as failure:
+        bridge.delete_event("native-1")
+    assert failure.value.error_code == "HELPER_COMPILE_TIMEOUT"
+    assert bridge.get_event("native-1").title == "Read"
+
+
+def test_failed_helper_compile_is_not_retried_in_the_process(monkeypatch, tmp_path):
+    source = tmp_path / "source.swift"
+    source.write_text("// helper")
+    calls = []
+
+    def stalled_swiftc(command, **kwargs):
+        calls.append(command)
+        raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+
+    monkeypatch.setattr(subprocess, "run", stalled_swiftc)
+    for _ in range(3):
+        # Each tool call builds a new bridge; the failure is remembered across them.
+        with pytest.raises(CalendarBridgeError) as failure:
+            CalendarBridge(source, tmp_path / "helper.app/Contents/MacOS/helper")._ensure_helper()
+        assert failure.value.error_code == "HELPER_COMPILE_TIMEOUT"
+    assert len(calls) == 1
+
+
+def test_occurrence_id_miss_does_not_fall_back_to_automation(monkeypatch):
+    bridge = CalendarBridge(Path("/tmp/source.swift"), Path("/tmp/helper"))
+
+    def not_found(command: str, *args: str) -> dict[str, object]:
+        raise CalendarBridgeError("EVENT_NOT_FOUND", "gone")
+
+    def unexpected(*args, **kwargs):
+        raise AssertionError("JXA cannot resolve an occurrence id")
+
+    monkeypatch.setattr(bridge, "_run_helper", not_found)
+    monkeypatch.setattr(bridge, "_fallback_delete_event", unexpected)
+
+    with pytest.raises(CalendarBridgeError) as failure:
+        bridge.delete_event("ABC-123@2026-10-12T07:00:00Z")
+    assert failure.value.error_code == "EVENT_NOT_FOUND"
+
+
+def test_update_event_sends_empty_notes_and_location_to_clear_them(monkeypatch):
+    # The helper reads "" as "clear": the only way to remove them, since None means no change.
+    bridge = CalendarBridge(Path("/tmp/source.swift"), Path("/tmp/helper"))
+    requests = []
+
+    def fake_run_helper(command: str, *args: str) -> dict[str, object]:
+        requests.append((command, *args))
+        return {"event_id": "native-1", "title": "New"}
+
+    monkeypatch.setattr(bridge, "_run_helper", fake_run_helper)
+
+    bridge.update_event("native-1", title="New", notes="", location="")
+    bridge.update_event("native-1", title="New")
+
+    assert requests == [
+        ("update-calendar-event", "native-1", '{"title": "New", "notes": "", "location": ""}'),
+        ("update-calendar-event", "native-1", '{"title": "New"}'),
+    ]
+
+
+def test_recurring_events_get_occurrence_ids_in_the_helper():
+    # The Swift helper cannot run under pytest; pin the occurrence-id contract in its source.
+    from apple_calendar_mcp import calendar_bridge
+
+    package = Path(calendar_bridge.__file__).parent
+    source = (package / "apple_pim_bridge.swift").read_text()
+
+    assert "event_id: eventID(event)," in source
+    assert source.count("resolveEvent(store: store, eventID: eventID)") == 4
+    assert source.count("store.event(withIdentifier:") == 1
+    # Both update and delete describe which occurrence a bare id targets.
+    assert (package / "tools.py").read_text().count("or the first occurrence for a bare id") == 2

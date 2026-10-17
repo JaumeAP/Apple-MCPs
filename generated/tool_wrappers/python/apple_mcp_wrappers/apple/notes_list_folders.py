@@ -13,7 +13,7 @@ async def notes_list_folders(
 ) -> Any:
     """Notes List Folders
 
-    Delegated Apple domain tool 'notes_list_folders' exposed through Apple-Tools-MCP.
+    List Apple Notes folders.
 
     Example:
         await notes_list_folders(client, account_name='example_account_name', limit=1)

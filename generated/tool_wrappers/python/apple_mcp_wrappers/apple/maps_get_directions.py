@@ -13,7 +13,7 @@ async def maps_get_directions(
 ) -> Any:
     """Maps Get Directions
 
-    Delegated Apple domain tool 'maps_get_directions' exposed through Apple-Tools-MCP.
+    Get Apple Maps route details between an origin and destination.
 
     Example:
         await maps_get_directions(client, origin='example_origin', destination='example_destination')

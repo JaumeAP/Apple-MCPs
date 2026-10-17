@@ -13,7 +13,7 @@ async def maps_build_maps_link(
 ) -> Any:
     """Maps Build Maps Link
 
-    Delegated Apple domain tool 'maps_build_maps_link' exposed through Apple-Tools-MCP.
+    Build an Apple Maps URL for a destination or route.
 
     Example:
         await maps_build_maps_link(client, destination='example_destination', origin='example_origin')

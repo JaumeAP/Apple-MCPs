@@ -65,6 +65,26 @@ def test_get_message_and_attachments(tmp_path) -> None:
     assert attachments[0].transfer_name == "file.png"
 
 
+def test_search_messages_escapes_wildcards_and_clamps_limit(tmp_path) -> None:
+    db_path = tmp_path / "chat.db"
+    _build_fixture(db_path)
+    conn = sqlite3.connect(db_path)
+    conn.executemany(
+        "INSERT INTO message VALUES (?, ?, 1, ?, NULL, 'iMessage', ?, 0, 1, 0)",
+        [(rowid, f"bulk-{rowid}", "50% off_now", rowid) for rowid in range(10, 610)],
+    )
+    conn.executemany("INSERT INTO chat_message_join VALUES (1, ?)", [(rowid,) for rowid in range(10, 610)])
+    conn.commit()
+    conn.close()
+    bridge = MessagesDBBridge(db_path)
+
+    assert bridge.search_messages(query="hello%") == []
+    assert bridge.search_messages(query="h_llo") == []
+    assert len(bridge.search_messages(query="0% off_", limit=10**9)) == 500
+    assert len(bridge.get_conversation("chat-guid-1", limit=10**9).messages) == 500
+    assert len(bridge.list_conversations(limit=10**9)) == 1
+
+
 def test_history_access_diagnostic_reports_missing_db(tmp_path) -> None:
     bridge = MessagesDBBridge(tmp_path / "missing-chat.db")
 

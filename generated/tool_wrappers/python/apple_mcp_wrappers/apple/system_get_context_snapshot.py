@@ -10,7 +10,7 @@ async def system_get_context_snapshot(
 ) -> Any:
     """System Get Context Snapshot
 
-    Delegated Apple domain tool 'system_get_context_snapshot' exposed through Apple-Tools-MCP.
+    Return a richer macOS context snapshot, including battery, frontmost app, and Focus metadata.
 
     Example:
         await system_get_context_snapshot(client)

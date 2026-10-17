@@ -11,7 +11,7 @@ async def files_list_recent_locations(
 ) -> Any:
     """Files List Recent Locations
 
-    Delegated Apple domain tool 'files_list_recent_locations' exposed through Apple-Tools-MCP.
+    List recently active parent folders across the allowed roots, including iCloud-aware metadata.
 
     Example:
         await files_list_recent_locations(client, limit=1)

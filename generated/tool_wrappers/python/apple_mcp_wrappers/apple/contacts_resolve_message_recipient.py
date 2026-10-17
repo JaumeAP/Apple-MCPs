@@ -12,7 +12,7 @@ async def contacts_resolve_message_recipient(
 ) -> Any:
     """Contacts Resolve Message Recipient
 
-    Delegated Apple domain tool 'contacts_resolve_message_recipient' exposed through Apple-Tools-MCP.
+    Resolve a contact into a message-ready phone number or email address.
 
     Example:
         await contacts_resolve_message_recipient(client, query='find apple', channel='example_channel')

@@ -11,7 +11,7 @@ async def shortcuts_view_shortcut(
 ) -> Any:
     """Shortcuts View Shortcut
 
-    Delegated Apple domain tool 'shortcuts_view_shortcut' exposed through Apple-Tools-MCP.
+    Open a shortcut in the Shortcuts app by name or identifier and return its metadata.
 
     Example:
         await shortcuts_view_shortcut(client, shortcut_name_or_identifier='example_shortcut_name_or_identifier')

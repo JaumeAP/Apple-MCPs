@@ -95,6 +95,12 @@ def test_explicit_excluded_calendar_is_blocked_without_event_lookup(scoped):
     assert scoped.queries == []
 
 
+def test_empty_calendar_id_means_every_allowed_calendar(scoped):
+    result = tools.calendar_list_events(START, END, calendar_id="")
+    assert result.ok is True
+    assert [item.calendar_name for item in result.events] == ["Work"]
+
+
 def test_unknown_explicit_calendar_fails_closed_with_scope(scoped):
     result = tools.calendar_list_events(START, END, calendar_id="unknown")
     assert result.ok is False

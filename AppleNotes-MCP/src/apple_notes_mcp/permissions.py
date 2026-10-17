@@ -20,9 +20,10 @@ MANAGE_ACTIONS = frozenset(
         "notes_move_note",
         "notes_create_folder",
         "notes_rename_folder",
-        "notes_delete_folder",
     }
 )
+# Deleting a folder also deletes every note inside it, so it needs full_access.
+FULL_ACCESS_ACTIONS = frozenset({"notes_delete_folder"})
 
 
 class SafetyError(Exception):
@@ -43,9 +44,11 @@ def ensure_action_allowed(action: str, account_name: str | None = None, folder_n
             raise SafetyError("FOLDER_BLOCKED", f"Folder '{folder_name}' is not in the allowed folder list.", "Choose one of the configured allowed folders or clear the allowlist.")
         return
 
-    if action in MANAGE_ACTIONS:
+    if action in MANAGE_ACTIONS or action in FULL_ACCESS_ACTIONS:
         if settings.safety_mode == "safe_readonly":
             raise SafetyError("WRITE_BLOCKED", f"Action '{action}' is blocked in safety mode '{settings.safety_mode}'.", "Switch to safe_manage or full_access to mutate notes.")
+        if action in FULL_ACCESS_ACTIONS and settings.safety_mode != "full_access":
+            raise SafetyError("WRITE_BLOCKED", f"Action '{action}' is blocked in safety mode '{settings.safety_mode}'.", "Switch to full_access to delete folders and the notes inside them.")
         if settings.allowed_accounts and account_name is not None and account_name not in settings.allowed_accounts:
             raise SafetyError("ACCOUNT_BLOCKED", f"Account '{account_name}' is not in the allowed account list.", "Choose one of the configured allowed accounts or clear the allowlist.")
         if settings.allowed_folders and folder_name is not None and folder_name not in settings.allowed_folders:

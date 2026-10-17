@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime
 
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.types import Annotations, ToolAnnotations
 
 from apple_mcp_common.discovery import install_search_first_discovery
-from apple_mcp_common.runtime import notify_resources_changed, require_loopback_host
+from apple_mcp_common.runtime import notify_resources_changed, require_loopback_host, swift_trim
 from apple_reminders_mcp.config import load_settings
 from apple_reminders_mcp.models import (
     DeleteReminderListResponse,
@@ -18,6 +19,7 @@ from apple_reminders_mcp.models import (
     ReminderListMutationResponse,
     ReminderListResponse,
     ReminderResponse,
+    ReminderSummary,
     ToolError,
 )
 from apple_reminders_mcp.permissions import SafetyError, ensure_action_allowed
@@ -82,6 +84,53 @@ def _reminder_owner_list(reminder_id: str) -> str | None:
     return detail.list_name
 
 
+def _list_title(list_id: str) -> str | None:
+    for list_info in _bridge().list_lists():
+        if list_info.list_id == list_id:
+            return list_info.title
+    return None
+
+
+def _clean_id(value: str | None) -> str | None:
+    # The Swift helper trims ids, so an untrimmed id would miss the exact-match
+    # allowlist lookups here yet still reach the list. An empty id means no id.
+    if value is None:
+        return None
+    return swift_trim(value) or None
+
+
+def _list_visible(list_name: str) -> bool:
+    allowed_lists = load_settings().allowed_lists
+    return not allowed_lists or list_name in allowed_lists
+
+
+def _helper_order(item: ReminderSummary) -> tuple[bool, float, str]:
+    # The helper's own order: due date (undated last), then title.
+    due = None
+    if item.due_date:
+        try:
+            due = datetime.fromisoformat(item.due_date.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            due = None
+    return (due is None, due or 0.0, item.title.casefold())
+
+
+def _visible_reminders(*, list_id: str | None, limit: int, **filters: object) -> list[ReminderSummary]:
+    bridge = _bridge()
+    if list_id is not None or not load_settings().allowed_lists:
+        return [item for item in bridge.list_reminders(list_id=list_id, limit=limit, **filters) if _list_visible(item.list_name)]
+    # Query each allowed list and cap after merging: a cap applied across all
+    # lists could fill up with blocked reminders and hide the allowed ones.
+    merged = [
+        item
+        for list_info in bridge.list_lists()
+        if _list_visible(list_info.title)
+        for item in bridge.list_reminders(list_id=list_info.list_id, limit=limit, **filters)
+        if _list_visible(item.list_name)
+    ]
+    return sorted(merged, key=_helper_order)[:limit]
+
+
 @mcp.resource(
     "reminders://lists",
     name="reminder_lists",
@@ -91,7 +140,7 @@ def _reminder_owner_list(reminder_id: str) -> str | None:
     annotations=Annotations(audience=["assistant"], priority=0.9),
 )
 def reminders_lists_resource() -> str:
-    lists = _bridge().list_lists()
+    lists = [item for item in _bridge().list_lists() if _list_visible(item.title)]
     return _resource_json({"lists": [item.model_dump() for item in lists], "count": len(lists)})
 
 
@@ -104,7 +153,7 @@ def reminders_lists_resource() -> str:
     annotations=Annotations(audience=["assistant"], priority=0.8),
 )
 def reminders_today_resource() -> str:
-    reminders = _bridge().list_reminders(include_completed=False, limit=25)
+    reminders = _visible_reminders(list_id=None, limit=25, include_completed=False)
     return _resource_json({"reminders": [item.model_dump() for item in reminders], "count": len(reminders)})
 
 
@@ -186,7 +235,7 @@ async def reminders_recheck_permissions(ctx: Context) -> HealthResponse:
 def reminders_list_lists() -> ReminderListResponse | ErrorResponse:
     try:
         ensure_action_allowed("reminders_list_lists")
-        lists = _bridge().list_lists()
+        lists = [item for item in _bridge().list_lists() if _list_visible(item.title)]
         return ReminderListResponse(lists=lists, count=len(lists))
     except (SafetyError, RemindersBridgeError) as exc:
         return _error_response(exc.error_code, exc.message, exc.suggestion)
@@ -218,7 +267,13 @@ def reminders_create_list(title: str) -> ReminderListMutationResponse | ErrorRes
 )
 def reminders_delete_list(list_id: str) -> DeleteReminderListResponse | ErrorResponse:
     try:
-        ensure_action_allowed("reminders_delete_list")
+        # Only ids that resolve to a reminder list are passed on, so the allowlist
+        # applies and a calendar id can never reach the helper.
+        list_id = swift_trim(list_id)
+        list_title = _list_title(list_id)
+        ensure_action_allowed("reminders_delete_list", list_title)
+        if list_title is None:
+            return DeleteReminderListResponse(list_id=list_id, deleted=False)
         return _bridge().delete_list(list_id=list_id)
     except SafetyError as exc:
         return _error_response(exc.error_code, exc.message, exc.suggestion)
@@ -242,17 +297,13 @@ def reminders_list_reminders(
 ) -> ReminderListItemsResponse | ErrorResponse:
     try:
         limit_value = _coerce_int_arg("limit", limit, minimum=1)
-        list_name = None
-        if list_id is not None:
-            for list_info in _bridge().list_lists():
-                if list_info.list_id == list_id:
-                    list_name = list_info.title
-                    break
+        list_id = _clean_id(list_id)
+        list_name = _list_title(list_id) if list_id is not None else None
         ensure_action_allowed("reminders_list_reminders", list_name)
-        reminders = _bridge().list_reminders(
+        reminders = _visible_reminders(
             list_id=list_id,
-            include_completed=include_completed,
             limit=limit_value,
+            include_completed=include_completed,
             search=search,
             due_after=due_after,
             due_before=due_before,
@@ -274,7 +325,7 @@ def reminders_list_reminders(
 )
 def reminders_get_reminder(reminder_id: str) -> ReminderResponse | ErrorResponse:
     try:
-        detail = _bridge().get_reminder(reminder_id)
+        detail = _bridge().get_reminder(swift_trim(reminder_id))
         ensure_action_allowed("reminders_get_reminder", detail.list_name)
         return ReminderResponse(reminder=detail)
     except SafetyError as exc:
@@ -310,11 +361,11 @@ def reminders_create_reminder(
                 "Create a top-level reminder instead, or omit parent_reminder_id.",
             )
         priority_value = _coerce_int_arg("priority", priority, minimum=0)
-        list_title = None
-        for list_info in _bridge().list_lists():
-            if list_info.list_id == list_id:
-                list_title = list_info.title
-                break
+        list_id = swift_trim(list_id)
+        list_title = _list_title(list_id)
+        # Fail closed: an unresolved list must never skip the allowlist check.
+        if list_title is None:
+            return _error_response("LIST_NOT_FOUND", f"No reminder list matched '{list_id}'.", "List reminder lists first to discover valid ids.")
         ensure_action_allowed("reminders_create_reminder", list_title)
         detail = _bridge().create_reminder(
             title=title.strip(),
@@ -338,7 +389,7 @@ def reminders_create_reminder(
 
 @mcp.tool(
     title="Update Reminder",
-    description="Update one or more fields on an existing reminder.",
+    description="Update one or more fields on an existing reminder. An empty list_id leaves the list unchanged; an empty or blank (only whitespace or zero-width characters) notes clears the notes.",
     annotations=ToolAnnotations(destructive_hint=False, idempotent_hint=False, open_world_hint=False),
     structured_output=True,
 )
@@ -361,7 +412,19 @@ def reminders_update_reminder(
                 "Apple Reminders subtasks are not available through the public APIs used by this MCP.",
                 "Update the reminder without parent_reminder_id.",
             )
+        reminder_id = swift_trim(reminder_id)
+        # An empty list_id means "do not move", not "move to a list called ''".
+        list_id = _clean_id(list_id)
         ensure_action_allowed("reminders_update_reminder", _reminder_owner_list(reminder_id))
+        if list_id is not None:
+            destination_title = _list_title(list_id)
+            if destination_title is None:
+                return _error_response(
+                    "LIST_NOT_FOUND",
+                    f"No reminder list matched '{list_id}'.",
+                    "List reminder lists first to discover valid ids.",
+                )
+            ensure_action_allowed("reminders_update_reminder", destination_title)
         priority_value = _coerce_int_arg("priority", priority, minimum=0) if priority is not None else None
         detail = _bridge().update_reminder(
             reminder_id,
@@ -390,6 +453,7 @@ def reminders_update_reminder(
 )
 def reminders_complete_reminder(reminder_id: str) -> ReminderResponse | ErrorResponse:
     try:
+        reminder_id = swift_trim(reminder_id)
         ensure_action_allowed("reminders_complete_reminder", _reminder_owner_list(reminder_id))
         detail = _bridge().set_completed(reminder_id, True)
         return ReminderResponse(reminder=detail)
@@ -407,6 +471,7 @@ def reminders_complete_reminder(reminder_id: str) -> ReminderResponse | ErrorRes
 )
 def reminders_uncomplete_reminder(reminder_id: str) -> ReminderResponse | ErrorResponse:
     try:
+        reminder_id = swift_trim(reminder_id)
         ensure_action_allowed("reminders_uncomplete_reminder", _reminder_owner_list(reminder_id))
         detail = _bridge().set_completed(reminder_id, False)
         return ReminderResponse(reminder=detail)
@@ -424,6 +489,7 @@ def reminders_uncomplete_reminder(reminder_id: str) -> ReminderResponse | ErrorR
 )
 def reminders_delete_reminder(reminder_id: str) -> DeleteReminderResponse | ErrorResponse:
     try:
+        reminder_id = swift_trim(reminder_id)
         ensure_action_allowed("reminders_delete_reminder", _reminder_owner_list(reminder_id))
         deleted = _bridge().delete_reminder(reminder_id)
         return DeleteReminderResponse(deleted=deleted, reminder_id=reminder_id)

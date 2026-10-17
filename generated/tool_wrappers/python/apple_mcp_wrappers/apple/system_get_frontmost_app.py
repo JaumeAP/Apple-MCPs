@@ -10,7 +10,7 @@ async def system_get_frontmost_app(
 ) -> Any:
     """System Get Frontmost App
 
-    Delegated Apple domain tool 'system_get_frontmost_app' exposed through Apple-Tools-MCP.
+    Get the name of the current frontmost application.
 
     Example:
         await system_get_frontmost_app(client)

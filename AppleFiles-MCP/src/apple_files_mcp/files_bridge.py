@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import heapq
 import os
 import plistlib
+import shutil
+import stat
 import subprocess
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -27,6 +31,22 @@ def _iso_timestamp(timestamp: float | None) -> str | None:
 
 class FilesBridge:
     _ICLOUD_SUFFIX = Path("Library/Mobile Documents/com~apple~CloudDocs")
+    _MAX_READ_BYTES = 1_000_000
+    _MAX_WRITE_BYTES = 10_000_000
+    # Executables, installers and documents that redirect `open` to another target.
+    _UNSAFE_OPEN_SUFFIXES = frozenset(
+        {
+            ".app", ".command", ".tool", ".terminal", ".term", ".sh", ".workflow", ".action",
+            ".scpt", ".scptd", ".applescript", ".pkg", ".mpkg", ".prefpane", ".shortcut",
+            ".webloc", ".fileloc", ".inetloc", ".url", ".jar", ".class", ".jnlp", ".afploc", ".atloc", ".ftploc",
+            ".mailloc", ".newsloc", ".nfsloc", ".smbloc", ".vncloc",
+        }
+    )
+    # Scripts that a default handler (Python Launcher and the like) may run: refused
+    # whatever their execute bit.
+    _SCRIPT_SUFFIXES = frozenset(
+        {".py", ".pyc", ".pyw", ".pl", ".rb", ".zsh", ".bash", ".csh", ".tcsh", ".ksh", ".php", ".js", ".tcl", ".lua"}
+    )
 
     def __init__(self, allowed_roots: tuple[Path, ...]) -> None:
         self.allowed_roots = tuple(path.expanduser().resolve(strict=False) for path in allowed_roots)
@@ -45,7 +65,7 @@ class FilesBridge:
     def _location_kind(self, path: Path) -> str:
         return "icloud" if self._is_icloud_path(path) else "local"
 
-    def _ensure_allowed(self, path: str, *, allow_missing: bool = False) -> Path:
+    def _ensure_allowed(self, path: str, *, allow_missing: bool = False, refuse_hidden: bool = False) -> Path:
         candidate = Path(path).expanduser()
         resolved = candidate.resolve(strict=False)
         if not allow_missing and not resolved.exists():
@@ -54,6 +74,13 @@ class FilesBridge:
             raise FilesBridgeError("PARENT_NOT_FOUND", f"Parent folder does not exist: {resolved.parent}", "Choose a destination inside an existing folder.")
         for root in self.allowed_roots:
             if resolved.is_relative_to(root):
+                # Hidden segments below the root are refused for destinations, as search already skips them.
+                if refuse_hidden and any(part.startswith(".") for part in resolved.relative_to(root).parts):
+                    raise FilesBridgeError(
+                        "PATH_NOT_ALLOWED",
+                        f"Destination has a hidden path segment: {resolved}",
+                        "Choose a destination without a segment that starts with a dot.",
+                    )
                 return resolved
         raise FilesBridgeError(
             "PATH_NOT_ALLOWED",
@@ -169,9 +196,11 @@ class FilesBridge:
 
     def read_text_file(self, path: str, max_bytes: int = 100_000) -> tuple[str, bool]:
         file_path = self._ensure_allowed(path)
-        if file_path.is_dir():
-            raise FilesBridgeError("NOT_A_FILE", f"Path is a directory: {file_path}", "Choose a text file path.")
-        raw = file_path.read_bytes()
+        if not stat.S_ISREG(file_path.stat().st_mode):
+            raise FilesBridgeError("NOT_A_FILE", f"Path is not a regular file: {file_path}", "Choose a text file path.")
+        max_bytes = max(1, min(max_bytes, self._MAX_READ_BYTES))
+        with file_path.open("rb") as handle:
+            raw = handle.read(max_bytes + 1)
         truncated = len(raw) > max_bytes
         payload = raw[:max_bytes]
         try:
@@ -205,8 +234,8 @@ class FilesBridge:
                 continue
             seen_paths.add(path_text)
             try:
-                entries.append(self._entry(Path(path_text)))
-            except OSError:
+                entries.append(self._entry(self._ensure_allowed(path_text)))
+            except (OSError, FilesBridgeError):
                 continue
         return entries[:limit]
 
@@ -229,12 +258,7 @@ class FilesBridge:
                     "!",
                     "-name",
                     ".*",
-                    "-exec",
-                    "stat",
-                    "-f",
-                    "%m\t%N",
-                    "{}",
-                    "+",
+                    "-print0",
                 ],
                 capture_output=True,
                 text=True,
@@ -242,32 +266,50 @@ class FilesBridge:
                 timeout=8,
             )
         except FileNotFoundError as exc:
-            raise FilesBridgeError("COMMAND_NOT_FOUND", "Missing find/stat command.", "Run this server on macOS.") from exc
+            raise FilesBridgeError("COMMAND_NOT_FOUND", "Missing find command.", "Run this server on macOS.") from exc
         except OSError as exc:
-            raise FilesBridgeError("COMMAND_FAILED", f"Could not run find/stat: {exc}", "Run this server on macOS.") from exc
+            raise FilesBridgeError("COMMAND_FAILED", f"Could not run find: {exc}", "Run this server on macOS.") from exc
         except subprocess.CalledProcessError as exc:
             stderr = exc.stderr.strip() or exc.stdout.strip()
             raise FilesBridgeError("COMMAND_FAILED", stderr or f"Recent file scan failed for {root}.", "Retry the request.") from exc
         except subprocess.TimeoutExpired as exc:
             raise FilesBridgeError("COMMAND_TIMEOUT", f"Recent file scan timed out for {root}.", "Retry the request with fewer allowed roots.") from exc
+        # NUL is the only byte a file name cannot contain, so names with newlines or tabs stay whole.
         candidates: list[tuple[float, str]] = []
-        for line in completed.stdout.splitlines():
-            if "\t" not in line:
-                continue
-            modified_text, path_text = line.split("\t", 1)
-            cleaned_path = path_text.strip().strip('"')
-            if not cleaned_path:
+        for path_text in completed.stdout.split("\0"):
+            if not path_text:
                 continue
             try:
-                modified_ts = float(modified_text)
-            except ValueError:
+                modified_ts = os.lstat(path_text).st_mtime
+            except OSError:
                 continue
-            candidates.append((modified_ts, cleaned_path))
+            candidates.append((modified_ts, path_text))
         return candidates
 
     def open_path(self, path: str) -> str:
         target = self._ensure_allowed(path)
-        self._run("open", str(target))
+        if target.suffix.lower() in self._UNSAFE_OPEN_SUFFIXES | self._SCRIPT_SUFFIXES:
+            raise FilesBridgeError(
+                "UNSAFE_OPEN_TARGET",
+                f"Refusing to open an executable, installer or link document: {target}",
+                "Use files_reveal_in_finder and open it yourself if you trust it.",
+            )
+        if target.is_file():
+            try:
+                with target.open("rb") as handle:
+                    is_alias = handle.read(12) == b"book\0\0\0\0mark"
+            except OSError as exc:
+                raise FilesBridgeError("READ_FAILED", f"Could not read {target}: {exc.strerror}", "Check the file permissions.") from exc
+            # Any executable file is refused, whatever its type: a +x file with a
+            # known suffix (.class, .exe) can still reach a handler that runs it.
+            # Photos copied from exFAT are often +x too; reveal them in Finder instead.
+            if is_alias or os.access(target, os.X_OK):
+                raise FilesBridgeError(
+                    "UNSAFE_OPEN_TARGET",
+                    f"Refusing to open an executable file or Finder alias: {target}",
+                    "Use files_reveal_in_finder and open it yourself if you trust it.",
+                )
+        self._run("open", "--", str(target))
         return str(target)
 
     def reveal_in_finder(self, path: str) -> str:
@@ -343,16 +385,164 @@ class FilesBridge:
 
     def move_path(self, source: str, destination: str) -> tuple[str, str]:
         source_path = self._ensure_allowed(source)
-        destination_path = self._ensure_allowed(destination, allow_missing=True)
+        # An allowed root, or a folder holding one, is never moved: the server would lose its own scope.
+        if any(root.is_relative_to(source_path) for root in self.allowed_roots):
+            raise FilesBridgeError(
+                "ROOT_PROTECTED",
+                f"Refusing to move an allowed root or a folder that contains one: {source_path}",
+                "Move something inside the root instead.",
+            )
+        destination_path = self._ensure_allowed(destination, allow_missing=True, refuse_hidden=True)
+        # A same-file destination is a case-only rename on a case-insensitive volume, not an overwrite.
+        if os.path.lexists(destination_path) and not os.path.samefile(source_path, destination_path):
+            raise FilesBridgeError(
+                "DESTINATION_EXISTS",
+                f"Destination already exists: {destination_path}",
+                "Choose a destination path that does not exist yet.",
+            )
+        # ponytail: check-then-rename race; use renamex_np(RENAME_EXCL) via ctypes if concurrent writers matter.
         source_path.rename(destination_path)
         return str(source_path), str(destination_path)
 
-    def delete_path(self, path: str) -> str:
+    def create_file(self, path: str, text: str | None = None, content_base64: str | None = None) -> str:
+        # An empty string on the unused parameter means unset; text="" alone is an empty file.
+        if content_base64 == "" and text is not None:
+            content_base64 = None
+        elif text == "" and content_base64 is not None:
+            text = None
+        if (text is None) == (content_base64 is None):
+            raise FilesBridgeError("INVALID_INPUT", "Pass exactly one of text or content_base64.", "Use text for UTF-8 content, content_base64 for binary content.")
+        if content_base64 is not None:
+            try:
+                payload = base64.b64decode(content_base64, validate=True)
+            except (binascii.Error, ValueError) as exc:
+                raise FilesBridgeError("INVALID_INPUT", "content_base64 is not valid base64.", "Send standard base64 without line breaks.") from exc
+        else:
+            payload = (text or "").encode("utf-8")
+        if len(payload) > self._MAX_WRITE_BYTES:
+            raise FilesBridgeError("TOO_LARGE", f"Content is {len(payload)} bytes; the limit is {self._MAX_WRITE_BYTES}.", "Create the file in smaller parts or copy it instead.")
+        destination = self._ensure_allowed(path, allow_missing=True, refuse_hidden=True)
+        # Exclusive create: an existing file or folder is never overwritten.
+        try:
+            with destination.open("xb") as handle:
+                handle.write(payload)
+        except FileExistsError as exc:
+            raise FilesBridgeError(
+                "DESTINATION_EXISTS",
+                f"Destination already exists: {destination}",
+                "Choose a path that does not exist yet.",
+            ) from exc
+        except OSError:
+            # Only reachable after the exclusive create succeeded, so the partial file is ours.
+            destination.unlink(missing_ok=True)
+            raise
+        return str(destination)
+
+    @staticmethod
+    def _clear_execute_bits(path: Path) -> None:
+        os.chmod(path, stat.S_IMODE(path.stat().st_mode) & ~0o111)
+
+    @classmethod
+    def _copy_file_without_execute(cls, source: str, destination: str) -> str:
+        shutil.copy2(source, destination)
+        cls._clear_execute_bits(Path(destination))
+        return destination
+
+    def copy_path(self, source: str, destination: str) -> tuple[str, str]:
+        source_path = self._ensure_allowed(source)
+        destination_path = self._ensure_allowed(destination, allow_missing=True, refuse_hidden=True)
+        if source_path.is_dir():
+            return self._copy_folder(source_path, destination_path)
+        if not source_path.is_file():
+            raise FilesBridgeError("NOT_A_FILE", f"Not a regular file or folder: {source_path}", "Choose a file or a folder path.")
+        # Exclusive create: an existing destination is never overwritten.
+        created = False
+        try:
+            with source_path.open("rb") as reader, destination_path.open("xb") as writer:
+                created = True
+                shutil.copyfileobj(reader, writer)
+            shutil.copystat(source_path, destination_path)
+            # Execute bits are not carried over: a copy never becomes runnable by itself.
+            self._clear_execute_bits(destination_path)
+        except OSError as exc:
+            if not created and isinstance(exc, FileExistsError):
+                raise FilesBridgeError(
+                    "DESTINATION_EXISTS",
+                    f"Destination already exists: {destination_path}",
+                    "Choose a destination path that does not exist yet.",
+                ) from exc
+            # The exclusive create succeeded, so a partial destination is ours to remove.
+            if created:
+                destination_path.unlink(missing_ok=True)
+            raise FilesBridgeError(
+                "COPY_FAILED",
+                f"Copy failed: {exc.strerror or exc}",
+                "The partial destination was removed; retry the copy.",
+            ) from exc
+        return str(source_path), str(destination_path)
+
+    def _copy_folder(self, source_path: Path, destination_path: Path) -> tuple[str, str]:
+        if os.path.lexists(destination_path):
+            raise FilesBridgeError(
+                "DESTINATION_EXISTS",
+                f"Destination already exists: {destination_path}",
+                "Choose a destination path that does not exist yet.",
+            )
+        if destination_path.is_relative_to(source_path):
+            raise FilesBridgeError(
+                "DESTINATION_INSIDE_SOURCE",
+                f"Cannot copy a folder into itself: {source_path} -> {destination_path}",
+                "Choose a destination outside the source folder.",
+            )
+        # Atomic create: if it succeeds, the folder and everything under it is ours to clean up.
+        try:
+            destination_path.mkdir()
+        except FileExistsError as exc:
+            raise FilesBridgeError(
+                "DESTINATION_EXISTS",
+                f"Destination already exists: {destination_path}",
+                "Choose a destination path that does not exist yet.",
+            ) from exc
+        try:
+            # Links inside the tree are copied as links, never followed, so nothing outside the roots is read.
+            shutil.copytree(
+                source_path,
+                destination_path,
+                symlinks=True,
+                dirs_exist_ok=True,
+                copy_function=self._copy_file_without_execute,
+            )
+        except OSError as exc:  # shutil.Error is an OSError subclass
+            shutil.rmtree(destination_path, ignore_errors=True)
+            detail = str(exc)[:300] if isinstance(exc, shutil.Error) else (exc.strerror or str(exc))
+            raise FilesBridgeError(
+                "COPY_FAILED",
+                f"Copy failed: {detail}",
+                "The partial destination was removed; retry the copy.",
+            ) from exc
+        return str(source_path), str(destination_path)
+
+    def delete_path(self, path: str, recursive: bool = False) -> str:
         target = self._ensure_allowed(path)
+        # An allowed root, or a folder holding one, is never deleted: the server would lose its own scope.
+        if any(root.is_relative_to(target) for root in self.allowed_roots):
+            raise FilesBridgeError(
+                "ROOT_PROTECTED",
+                f"Refusing to delete an allowed root or a folder that contains one: {target}",
+                "Delete something inside the root instead.",
+            )
         if target.is_dir():
             if any(target.iterdir()):
-                raise FilesBridgeError("DIRECTORY_NOT_EMPTY", f"Directory is not empty: {target}", "Move or delete the contents first.")
-            target.rmdir()
+                if not recursive:
+                    raise FilesBridgeError(
+                        "DIRECTORY_NOT_EMPTY",
+                        f"Directory is not empty: {target}",
+                        "Move or delete the contents first, or pass recursive=true to delete the folder and everything in it.",
+                    )
+                # Links inside the tree are removed as links, never followed.
+                shutil.rmtree(target)
+            else:
+                target.rmdir()
         else:
             target.unlink()
         return str(target)

@@ -6,6 +6,7 @@ import os
 import plistlib
 import re
 import subprocess
+import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -39,6 +40,77 @@ class SystemBridge:
         "down": 125,
         "up": 126,
     }
+    # Terminals and apps that run typed code (script editors, IDEs with an integrated
+    # terminal). GUI input to them is refused even when they are allow-listed.
+    _TERMINAL_APP_NAMES: ClassVar[frozenset[str]] = frozenset(
+        {
+            "terminal",
+            "iterm2",
+            "iterm",
+            "warp",
+            "ghostty",
+            "kitty",
+            "alacritty",
+            "wezterm",
+            "script editor",
+            "automator",
+            "shortcuts",
+            "visual studio code",
+            "code",
+            "cursor",
+            "xcode",
+            "hyper",
+            "rio",
+            "tabby",
+            "zed",
+        }
+    )
+    _TERMINAL_BUNDLE_IDS: ClassVar[frozenset[str]] = frozenset(
+        {
+            "com.apple.terminal",
+            "com.googlecode.iterm2",
+            "dev.warp.warp-stable",
+            "dev.warp.warp",
+            "com.mitchellh.ghostty",
+            "net.kovidgoyal.kitty",
+            "org.alacritty",
+            "io.alacritty",
+            "com.github.wez.wezterm",
+            "com.apple.scripteditor2",
+            "com.apple.automator",
+            "com.apple.shortcuts",
+            "com.microsoft.vscode",
+            "com.microsoft.vscodeinsiders",
+            "com.vscodium",
+            "com.todesktop.230313mzl4w4u92",
+            "com.apple.dt.xcode",
+            "co.zeit.hyper",
+            "com.raphaelamorim.rio",
+            "org.tabby",
+            "com.tabby",
+            "dev.zed.zed",
+        }
+    )
+    _BUNDLE_ID_PATTERN: ClassVar[re.Pattern[str]] = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+    _PREFERENCE_DOMAIN_PATTERN: ClassVar[re.Pattern[str]] = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*(\.[A-Za-z0-9_-]+)+|[A-Za-z][A-Za-z0-9_-]*")
+    # Brings the application whose bundle identifier is `targetBundle` to the front and
+    # aborts unless it is frontmost. A background-only app never comes to the front, so
+    # it is refused here too. Keystrokes still go to whatever holds keyboard focus, not
+    # to the process in the `tell`: a non-activating panel such as Spotlight, a global
+    # hotkey, or a focus change during the input can receive them while the target
+    # stays frontmost.
+    # ponytail: frontmost check only; checking the AX focused application needs Accessibility access for the helper.
+    _FRONTMOST_GUARD: ClassVar[list[str]] = [
+        "tell application id targetBundle to activate",
+        'tell application "System Events"',
+        "repeat 20 times",
+        "set frontBundle to bundle identifier of first application process whose frontmost is true",
+        "if frontBundle is targetBundle then exit repeat",
+        "delay 0.05",
+        "end repeat",
+        "end tell",
+        'if frontBundle is not targetBundle then error "GUI_TARGET_NOT_FRONTMOST"',
+    ]
 
     def __init__(self, apps_helper_source: Path | None = None, apps_helper_binary: Path | None = None) -> None:
         if apps_helper_source is None or apps_helper_binary is None:
@@ -76,6 +148,12 @@ class SystemBridge:
                     "AUTOMATION_PERMISSION_REQUIRED",
                     stderr or "Automation permission is required for this action.",
                     "Approve the macOS automation prompt for the host app and retry.",
+                ) from exc
+            if "GUI_TARGET_NOT_FRONTMOST" in stderr:
+                raise SystemBridgeError(
+                    "GUI_TARGET_NOT_FRONTMOST",
+                    "The target application did not become frontmost, so no input was sent.",
+                    "Bring the target application to the front (background-only apps cannot receive GUI input) and retry.",
                 ) from exc
             raise SystemBridgeError("COMMAND_FAILED", stderr or "System command failed.", "Check macOS privacy permissions and retry.") from exc
         except subprocess.TimeoutExpired as exc:
@@ -135,7 +213,7 @@ class SystemBridge:
         """Return the compiled apps helper for the current source, compiling it if needed.
 
         The binary name carries a hash of the source, so an existing binary is always
-        current. Compilation writes to a per-process temporary file and renames it into
+        current. Compilation writes to a per-call temporary file and renames it into
         place, so concurrent servers never run a half-written binary.
         """
         try:
@@ -150,9 +228,13 @@ class SystemBridge:
         binary = self.apps_helper_binary.with_name(f"{self.apps_helper_binary.name}-{digest}")
         if binary.exists():
             return binary
-        binary.parent.mkdir(parents=True, exist_ok=True)
-        temporary = binary.with_name(f"{binary.name}.{os.getpid()}.tmp")
+        # A per-call name: the pid is shared by every thread of this server.
+        temporary = binary.with_name(f"{binary.name}.{uuid.uuid4().hex}.tmp")
         try:
+            try:
+                binary.parent.mkdir(parents=True, exist_ok=True)
+            except OSError as exc:
+                raise SystemBridgeError("HELPER_INSTALL_FAILED", f"Could not create the helper directory: {exc}.", "Retry the request.") from exc
             try:
                 completed = subprocess.run(
                     ["swiftc", "-O", str(self.apps_helper_source), "-o", str(temporary)],
@@ -179,7 +261,10 @@ class SystemBridge:
                     completed.stderr.strip() or completed.stdout.strip() or "Failed to compile the native helper.",
                     "Confirm Xcode command line tools and Swift are available, then retry.",
                 )
-            os.replace(temporary, binary)
+            try:
+                os.replace(temporary, binary)
+            except OSError as exc:
+                raise SystemBridgeError("HELPER_INSTALL_FAILED", f"Could not install the compiled native helper: {exc}.", "Retry the request.") from exc
         finally:
             temporary.unlink(missing_ok=True)
         return binary
@@ -215,6 +300,33 @@ class SystemBridge:
         else:
             payload = self._run_apps_helper("frontmost")
         return self._app_record(payload)
+
+    def _gui_input_target(self, application: str | None = None, bundle_id: str | None = None) -> AppRecord:
+        """Resolve the target of a GUI input action: a named, allow-listed, non-terminal application.
+
+        Clicks and keystrokes are never sent to whatever happens to be frontmost, only to an
+        application whose bundle id is in APPLE_SYSTEM_MCP_GUI_ALLOWED_APPS, and never to a
+        terminal or another app that runs typed code, even when it is allow-listed.
+        """
+        if not (application and application.strip()) and not (bundle_id and bundle_id.strip()):
+            raise SystemBridgeError(
+                "INVALID_INPUT",
+                "application or bundle_id is required for GUI input actions.",
+                "Name the target application; GUI input is never sent to the frontmost app implicitly.",
+            )
+        requested_name = (application or "").strip().lower().removesuffix(".app")
+        if requested_name in self._TERMINAL_APP_NAMES or (bundle_id or "").strip().lower() in self._TERMINAL_BUNDLE_IDS:
+            raise SystemBridgeError("TERMINAL_TARGET_REFUSED", "GUI input to terminal applications is refused.", "Target a non-terminal application.")
+        target_app = self._target_application(application=application, bundle_id=bundle_id)
+        if target_app.name.strip().lower() in self._TERMINAL_APP_NAMES or (target_app.bundle_id or "").lower() in self._TERMINAL_BUNDLE_IDS:
+            raise SystemBridgeError("TERMINAL_TARGET_REFUSED", "GUI input to terminal applications is refused.", "Target a non-terminal application.")
+        if not target_app.bundle_id or target_app.bundle_id.lower() not in load_settings().gui_allowed_apps:
+            raise SystemBridgeError(
+                "GUI_TARGET_NOT_ALLOWED",
+                f"GUI input to '{target_app.name}' ({target_app.bundle_id or 'no bundle id'}) is not allowed.",
+                "Add the application's bundle id to APPLE_SYSTEM_MCP_GUI_ALLOWED_APPS (comma-separated) and restart the server.",
+            )
+        return target_app
 
     def battery(self) -> BatteryStatus:
         raw = self._run("pmset", "-g", "batt")
@@ -263,14 +375,49 @@ class SystemBridge:
             args=[body, title, subtitle or ""],
         )
 
+    @staticmethod
+    def _trusted_app_roots() -> tuple[str, ...]:
+        # System locations are on the sealed system volume (Safari lives in the App
+        # cryptex); ~/Applications holds user installs. Build products, Downloads and
+        # other registered bundles elsewhere on disk are never launched.
+        return (
+            "/Applications/",
+            "/System/Applications/",
+            "/System/Library/CoreServices/",
+            "/System/Volumes/Preboot/Cryptexes/App/System/Applications/",
+            f"{Path.home()}/Applications/",
+        )
+
     def open_application(self, application: str | None = None, bundle_id: str | None = None) -> AppRecord:
+        # Launch Services resolves a name or bundle id to any registered bundle on disk,
+        # so the resolved path must be in a trusted install location, and that exact
+        # bundle is launched (`open -b` could pick another copy with the same id).
         if bundle_id and bundle_id.strip():
-            self._run("open", "-b", bundle_id.strip())
-            return self._target_application(bundle_id=bundle_id.strip())
-        if application and application.strip():
-            self._run("open", "-a", application.strip())
-            return self._target_application(application=application.strip())
-        raise SystemBridgeError("INVALID_INPUT", "application or bundle_id is required.", "Provide an application name or bundle identifier.")
+            target_bundle_id = bundle_id.strip()
+            if not self._BUNDLE_ID_PATTERN.fullmatch(target_bundle_id):
+                raise SystemBridgeError("INVALID_INPUT", f"Invalid bundle identifier '{target_bundle_id}'.", "Provide a reverse-DNS bundle identifier such as com.apple.Safari.")
+            payload = self._run_apps_helper("installed-bundle-id", target_bundle_id)
+        elif application and application.strip():
+            name = application.strip()
+            if "/" in name or name.lower().endswith(".app"):
+                raise SystemBridgeError(
+                    "INVALID_INPUT",
+                    f"Invalid application name '{name}'.",
+                    "Use an application name such as Safari or a bundle_id; paths and .app bundles are not accepted.",
+                )
+            payload = self._run_apps_helper("installed-name", name)
+        else:
+            raise SystemBridgeError("INVALID_INPUT", "application or bundle_id is required.", "Provide an application name or bundle identifier.")
+        resolved_bundle_id = self._app_record(payload).bundle_id or ""
+        app_path = os.path.normpath(str(payload.get("path") or "/")) if isinstance(payload, dict) else ""
+        if not app_path.endswith(".app") or not (app_path + "/").startswith(self._trusted_app_roots()):
+            raise SystemBridgeError(
+                "APPLICATION_NOT_TRUSTED",
+                f"'{application or bundle_id}' resolves to '{app_path or 'an unknown location'}', outside the trusted application folders.",
+                "Install the application in /Applications or ~/Applications.",
+            )
+        self._run("open", "-a", app_path)
+        return self._target_application(bundle_id=resolved_bundle_id)
 
     def list_settings_domains(self) -> list[dict[str, str]]:
         return [
@@ -430,16 +577,15 @@ class SystemBridge:
     def gui_click_menu_path(self, menu_path: list[str], application: str | None = None, bundle_id: str | None = None) -> AppRecord:
         if len(menu_path) < 2:
             raise SystemBridgeError("INVALID_INPUT", "menu_path must contain at least two items.", "Provide a top-level menu and a target item.")
-        target_app = self._target_application(application=application, bundle_id=bundle_id)
+        target_app = self._gui_input_target(application=application, bundle_id=bundle_id)
         self._run_osascript(
             [
                 "on run argv",
-                "set appName to item 1 of argv",
-                "set pathCount to count of argv",
-                'tell application appName to activate',
-                "delay 0.15",
+                "set targetBundle to last item of argv",
+                "set pathCount to (count of argv) - 1",
+                *self._FRONTMOST_GUARD,
                 'tell application "System Events"',
-                "tell process appName",
+                "tell (first application process whose bundle identifier is targetBundle)",
                 "set currentMenu to menu 1 of menu bar item (item 2 of argv) of menu bar 1",
                 "if pathCount is 3 then",
                 "click menu item (item 3 of argv) of currentMenu",
@@ -455,7 +601,7 @@ class SystemBridge:
                 'return "ok"',
                 "end run",
             ],
-            args=[target_app.name, *menu_path],
+            args=[target_app.name, *menu_path, target_app.bundle_id or ""],
         )
         return target_app
 
@@ -469,7 +615,7 @@ class SystemBridge:
         modifier_clause = ""
         if modifier_literals:
             modifier_clause = " using {" + ", ".join(modifier_literals) + "}"
-        target_app = self._target_application(application=application, bundle_id=bundle_id)
+        target_app = self._gui_input_target(application=application, bundle_id=bundle_id)
         key_value = key.strip()
         if not key_value:
             raise SystemBridgeError("INVALID_INPUT", "key must not be empty.", "Provide a printable key or supported special key name.")
@@ -480,12 +626,13 @@ class SystemBridge:
         self._run_osascript(
             [
                 "on run argv",
-                "set appName to item 1 of argv",
                 "set keyText to item 2 of argv",
-                'tell application appName to activate',
-                "delay 0.1",
+                "set targetBundle to item 3 of argv",
+                *self._FRONTMOST_GUARD,
                 'tell application "System Events"',
+                "tell (first application process whose bundle identifier is targetBundle)",
                 key_command,
+                "end tell",
                 "end tell",
                 'return "ok"',
                 "end run",
@@ -495,16 +642,17 @@ class SystemBridge:
         return target_app
 
     def gui_type_text(self, text: str, application: str | None = None, bundle_id: str | None = None) -> AppRecord:
-        target_app = self._target_application(application=application, bundle_id=bundle_id)
+        target_app = self._gui_input_target(application=application, bundle_id=bundle_id)
         self._run_osascript(
             [
                 "on run argv",
-                "set appName to item 1 of argv",
                 "set typedText to item 2 of argv",
-                'tell application appName to activate',
-                "delay 0.1",
+                "set targetBundle to item 3 of argv",
+                *self._FRONTMOST_GUARD,
                 'tell application "System Events"',
+                "tell (first application process whose bundle identifier is targetBundle)",
                 "keystroke typedText",
+                "end tell",
                 "end tell",
                 'return "ok"',
                 "end run",
@@ -525,18 +673,17 @@ class SystemBridge:
             raise SystemBridgeError("INVALID_INPUT", "label or description is required.", "Provide a button label or accessibility description.")
         if index < 1:
             raise SystemBridgeError("INVALID_INPUT", "index must be at least 1.", "Use a positive button index.")
-        target_app = self._target_application(application=application, bundle_id=bundle_id)
+        target_app = self._gui_input_target(application=application, bundle_id=bundle_id)
         self._run_osascript(
             [
                 "on run argv",
-                "set appName to item 1 of argv",
                 "set buttonName to item 2 of argv",
                 "set buttonDescription to item 3 of argv",
                 "set buttonIndex to (item 4 of argv) as integer",
-                'tell application appName to activate',
-                "delay 0.15",
+                "set targetBundle to item 5 of argv",
+                *self._FRONTMOST_GUARD,
                 'tell application "System Events"',
-                "tell process appName",
+                "tell (first application process whose bundle identifier is targetBundle)",
                 "tell front window",
                 "if buttonName is not \"\" then",
                 "set matchingButtons to every button whose name is buttonName",
@@ -565,18 +712,17 @@ class SystemBridge:
     ) -> AppRecord:
         if not label and not description:
             raise SystemBridgeError("INVALID_INPUT", "label or description is required.", "Provide a pop-up label or accessibility description.")
-        target_app = self._target_application(application=application, bundle_id=bundle_id)
+        target_app = self._gui_input_target(application=application, bundle_id=bundle_id)
         self._run_osascript(
             [
                 "on run argv",
-                "set appName to item 1 of argv",
                 "set popupLabel to item 2 of argv",
                 "set popupValue to item 3 of argv",
                 "set popupDescription to item 4 of argv",
-                'tell application appName to activate',
-                "delay 0.15",
+                "set targetBundle to item 5 of argv",
+                *self._FRONTMOST_GUARD,
                 'tell application "System Events"',
-                "tell process appName",
+                "tell (first application process whose bundle identifier is targetBundle)",
                 "tell front window",
                 "if popupLabel is not \"\" then",
                 "set targetPopup to first pop up button whose name is popupLabel",
@@ -661,6 +807,17 @@ class SystemBridge:
         normalized_domain = domain.strip()
         if not normalized_domain:
             raise SystemBridgeError("INVALID_INPUT", "Preference domain must not be empty.", "Provide a valid macOS defaults domain.")
+        if normalized_domain == "-g":
+            normalized_domain = "NSGlobalDomain"
+        # `defaults export` also accepts a file path or an option, so only plain
+        # reverse-DNS domains or single identifiers such as loginwindow (no '/', '~',
+        # leading '.' or '-') are passed through.
+        if not self._PREFERENCE_DOMAIN_PATTERN.fullmatch(normalized_domain):
+            raise SystemBridgeError(
+                "INVALID_INPUT",
+                f"Invalid preference domain '{normalized_domain}'.",
+                "Use NSGlobalDomain, loginwindow or a reverse-DNS domain such as com.apple.dock; file paths are not accepted.",
+            )
         command = ["defaults"]
         if current_host:
             command.append("-currentHost")

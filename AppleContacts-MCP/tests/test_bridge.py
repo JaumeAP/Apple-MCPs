@@ -1,5 +1,4 @@
 import hashlib
-import os
 import shutil
 import subprocess
 import sys
@@ -342,6 +341,121 @@ def test_update_contact_supports_no_change_sentinel(monkeypatch) -> None:
     assert calls[0][1][5] == "__NOCHANGE__"
 
 
+def test_update_contact_treats_empty_method_lists_as_no_change(monkeypatch) -> None:
+    bridge = AppleContactsBridge(*UNUSED_HELPER)
+    calls: list[tuple[str, tuple[str, ...]]] = []
+
+    def fake_run_script(script_name: str, *args: str) -> dict[str, object]:
+        calls.append((script_name, args))
+        if script_name == "update_contact.applescript":
+            return {"updated": True}
+        return {"found": True, "contact": contact_item("contact-1", name="Alice Doe", phone="+15551234567")}
+
+    monkeypatch.setattr(bridge, "_run_script", fake_run_script)
+
+    bridge.update_contact("contact-1", phones=[], emails=[])
+
+    assert calls[0][1][4:6] == ("__NOCHANGE__", "__NOCHANGE__")
+
+
+def test_resolve_recipient_rejects_several_name_matches(monkeypatch) -> None:
+    bridge = AppleContactsBridge(*UNUSED_HELPER)
+    # "Ann" exactly matches only the first contact; before the fix the exact match won
+    # over the second name match, and a letters-only query normalized to "" exact-matched
+    # any digitless phone.
+    items = [contact_item("ann", name="Ann Smith"), contact_item("joanne", name="Joanne Roe", phone="+15550001111")]
+    digitless = bridge._normalize_summary(contact_item("other", name="Other Person", phone="mobile"))
+
+    def fake_run_script(script_name: str, *args: str) -> dict[str, object]:
+        assert script_name == "search_contacts.applescript"
+        return {"items": items[: int(args[1])]}
+
+    monkeypatch.setattr(bridge, "_run_script", fake_run_script)
+
+    assert not bridge._is_exact_match(digitless, "ann", bridge._normalize_lookup_value("Ann"))
+    with pytest.raises(ContactsBridgeError) as failure:
+        bridge.resolve_message_recipient("Ann")
+    assert failure.value.error_code == "AMBIGUOUS_CONTACT"
+
+
+@pytest.mark.parametrize(
+    ("query", "target", "other"),
+    [
+        ("ann@example.com", contact_item("ann", name="Ann Smith", email="ann@example.com"), contact_item("joann", name="Joann Roe", email="joann@example.com")),
+        ("+15551234567", contact_item("plain", name="Plain Number", phone="+15551234567"), contact_item("ext", name="Ext Number", phone="+1 555 123 4567 ext. 89")),
+    ],
+)
+def test_resolve_recipient_complete_value_ignores_partial_match_and_returns_queried_method(monkeypatch, query, target, other) -> None:
+    bridge = AppleContactsBridge(*UNUSED_HELPER)
+    # The queried value is the target's second method: the result must be that one.
+    decoy = {"label": "home", "value": "+15550000000" if target["phones"] else "decoy@example.com"}
+    target_detail = {**target, "note": ""}
+    methods_key = "phones" if target["phones"] else "emails"
+    target_detail[methods_key] = [decoy, *target[methods_key]]
+
+    def fake_run_script(script_name: str, *args: str) -> dict[str, object]:
+        if script_name == "list_contacts.applescript":
+            return {"total": 2, "items": [other, target]}
+        assert script_name == "get_contact.applescript"
+        assert args == (target["contact_id"],)
+        return {"found": True, "contact": target_detail}
+
+    monkeypatch.setattr(bridge, "_run_script", fake_run_script)
+
+    result = bridge.resolve_message_recipient(query, channel="any")
+
+    assert result.contact.contact_id == target["contact_id"]
+    assert result.recipient_value == target[methods_key][0]["value"]
+
+
+@pytest.mark.parametrize(
+    ("query", "holder"),
+    [
+        ("ann@example.com", contact_item("joann", email="joann@example.com")),
+        ("bob@x.com", contact_item("bob", email="bob@x.com.au")),
+        ("+15551234567", contact_item("ext", phone="+1 555 123 4567 ext. 89")),
+    ],
+)
+def test_resolve_recipient_complete_value_without_exact_owner_is_not_found(monkeypatch, query, holder) -> None:
+    # A message must never go to a different address that merely contains the query.
+    bridge = AppleContactsBridge(*UNUSED_HELPER)
+
+    def fake_run_script(script_name: str, *args: str) -> dict[str, object]:
+        assert script_name == "list_contacts.applescript"
+        return {"total": 1, "items": [holder]}
+
+    monkeypatch.setattr(bridge, "_run_script", fake_run_script)
+
+    with pytest.raises(ContactsBridgeError) as failure:
+        bridge.resolve_message_recipient(query, channel="any")
+    assert failure.value.error_code == "CONTACT_NOT_FOUND"
+
+
+def test_update_contact_refuses_blank_method_value() -> None:
+    from apple_contacts_mcp.models import ContactMethod
+
+    bridge = AppleContactsBridge(*UNUSED_HELPER)
+    with pytest.raises(ContactsBridgeError) as failure:
+        bridge.update_contact("id", first_name="Ann", phones=[ContactMethod(label="", value=chr(0x200B) + " ")])
+    assert failure.value.error_code == "INVALID_INPUT"
+
+
+def test_resolve_recipient_rejects_complete_value_held_by_two_contacts(monkeypatch) -> None:
+    bridge = AppleContactsBridge(*UNUSED_HELPER)
+    items = [contact_item("one", email="shared@example.com"), contact_item("two", email="Shared@Example.com")]
+
+    def fake_run_script(script_name: str, *args: str) -> dict[str, object]:
+        assert script_name == "list_contacts.applescript"
+        return {"total": 2, "items": items}
+
+    monkeypatch.setattr(bridge, "_run_script", fake_run_script)
+
+    with pytest.raises(ContactsBridgeError) as failure:
+        bridge.resolve_message_recipient("shared@example.com", channel="email")
+    assert failure.value.error_code == "AMBIGUOUS_CONTACT"
+    assert "contact_id" not in (failure.value.suggestion or "")
+
+
 @pytest.mark.skipif(
     sys.platform != "darwin" or shutil.which("swiftc") is None,
     reason="swiftc is only available on macOS with the Xcode tools",
@@ -399,10 +513,13 @@ def test_ensure_helper_compiles_once_to_hashed_name(monkeypatch, tmp_path) -> No
     second = bridge._ensure_helper()
 
     expected = hashed_binary(bridge)
-    temporary = expected.with_name(f"{expected.name}.{os.getpid()}.tmp")
     assert first == second == expected
-    assert expected.exists() and not temporary.exists()
-    assert calls == [["swiftc", "-O", str(source), "-o", str(temporary)]]
+    assert expected.exists()
+    assert len(calls) == 1 and calls[0][:4] == ["swiftc", "-O", str(source), "-o"]
+    # A per-call temporary name, so threads of one process never collide, and none is left behind.
+    temporary = Path(calls[0][4])
+    assert temporary.parent == expected.parent and temporary.name.startswith(f"{expected.name}.") and temporary.suffix == ".tmp"
+    assert not temporary.exists()
 
 
 def test_ensure_helper_reuses_existing_hashed_binary(monkeypatch, tmp_path) -> None:

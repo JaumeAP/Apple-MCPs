@@ -159,6 +159,17 @@ def test_contacts_create_and_update_accept_methods(monkeypatch) -> None:
     assert captured["update"]["emails"][0].label == "work"
 
 
+def test_contacts_update_reports_empty_method_lists_as_unchanged(monkeypatch) -> None:
+    monkeypatch.setenv("APPLE_CONTACTS_MCP_SAFETY_MODE", "safe_manage")
+    load_settings.cache_clear()
+    monkeypatch.setattr(tools, "_bridge", lambda: FakeBridge())
+
+    result = tools.contacts_update_contact("contact-1", first_name="Alicia", phones=[], emails=[])
+
+    assert result.ok is True
+    assert result.unchanged_fields == ["last_name", "organization", "phones", "emails", "note"]
+
+
 def test_contacts_find_duplicates_tool(monkeypatch) -> None:
     class DuplicateBridge(FakeBridge):
         def find_duplicates(self):

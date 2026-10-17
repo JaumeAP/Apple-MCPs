@@ -12,7 +12,7 @@ async def messages_send_message(
 ) -> Any:
     """Messages Send Message
 
-    Delegated Apple domain tool 'messages_send_message' exposed through Apple-Tools-MCP.
+    Send a new iMessage through Messages.app.
 
     Example:
         await messages_send_message(client, recipient='Example Person', text='example_text')

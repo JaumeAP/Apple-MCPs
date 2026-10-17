@@ -334,7 +334,7 @@
         "location: string (optional)",
         "all_day: boolean (optional)"
       ],
-      "description": "Update one or more fields on an existing calendar event.",
+      "description": "Update one or more fields on an existing calendar event. With native Calendar access, a recurring event is changed for one occurrence only, not the rest of the series: the occurrence named by an event_id from list or get (\"<id>@<original start>\"), or the first occurrence for a bare id. The automation fallback may act on the whole series. An empty or blank (only whitespace or zero-width characters) notes or location clears that field; an empty calendar_id does not move the event.",
       "domain": "calendar",
       "example_calls": [
         {
@@ -361,10 +361,18 @@
         "more",
         "fields",
         "field",
-        "existing"
+        "existing",
+        "native",
+        "access",
+        "acces",
+        "recurring",
+        "changed",
+        "occurrence",
+        "only",
+        "not"
       ],
       "title": "Update Event",
-      "usage_intent": "Update one or more fields on an existing calendar event."
+      "usage_intent": "Update one or more fields on an existing calendar event. With native Calendar access, a recurring event is changed for one occurrence only, not the rest of the series: the occurrence named by an event_id from list or get (\"<id>@<original start>\"), or the first occurrence for a bare id. The automation fallback may act on the whole series. An empty or blank (only whitespace or zero-width characters) notes or location clears that field; an empty calendar_id does not move the event."
     },
     {
       "aliases": [
@@ -380,7 +388,7 @@
       "argument_summary": [
         "event_id: string (required)"
       ],
-      "description": "Delete a calendar event by event_id.",
+      "description": "Delete a calendar event by event_id. With native Calendar access, a recurring event is deleted for one occurrence only, not the rest of the series: the occurrence named by an event_id from list or get (\"<id>@<original start>\"), or the first occurrence for a bare id. The automation fallback may delete the whole series.",
       "domain": "calendar",
       "example_calls": [
         {
@@ -401,10 +409,23 @@
         "meeting",
         "meetings",
         "schedule",
-        "delete"
+        "delete",
+        "native",
+        "access",
+        "acces",
+        "recurring",
+        "deleted",
+        "one",
+        "occurrence",
+        "only",
+        "not",
+        "rest",
+        "series",
+        "sery",
+        "named"
       ],
       "title": "Delete Event",
-      "usage_intent": "Delete a calendar event by event_id."
+      "usage_intent": "Delete a calendar event by event_id. With native Calendar access, a recurring event is deleted for one occurrence only, not the rest of the series: the occurrence named by an event_id from list or get (\"<id>@<original start>\"), or the first occurrence for a bare id. The automation fallback may delete the whole series."
     },
     {
       "aliases": [

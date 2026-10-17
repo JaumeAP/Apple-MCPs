@@ -11,7 +11,7 @@ async def files_open_path(
 ) -> Any:
     """Files Open Path
 
-    Delegated Apple domain tool 'files_open_path' exposed through Apple-Tools-MCP.
+    Open a file or folder in the default app. Requires safe_manage or full_access safety mode.
 
     Example:
         await files_open_path(client, path='/path/to/item')

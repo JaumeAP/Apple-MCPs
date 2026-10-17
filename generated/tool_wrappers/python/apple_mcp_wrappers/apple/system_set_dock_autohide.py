@@ -11,7 +11,7 @@ async def system_set_dock_autohide(
 ) -> Any:
     """System Set Dock Autohide
 
-    Delegated Apple domain tool 'system_set_dock_autohide' exposed through Apple-Tools-MCP.
+    Enable or disable Dock autohide.
 
     Example:
         await system_set_dock_autohide(client, enabled=False)

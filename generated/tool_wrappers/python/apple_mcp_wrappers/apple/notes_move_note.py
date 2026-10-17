@@ -12,7 +12,7 @@ async def notes_move_note(
 ) -> Any:
     """Notes Move Note
 
-    Delegated Apple domain tool 'notes_move_note' exposed through Apple-Tools-MCP.
+    Move a note to a different folder.
 
     Example:
         await notes_move_note(client, note_id='example_note_id', folder_id='example_folder_id')

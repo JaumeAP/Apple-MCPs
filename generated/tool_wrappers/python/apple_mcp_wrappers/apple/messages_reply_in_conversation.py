@@ -12,7 +12,7 @@ async def messages_reply_in_conversation(
 ) -> Any:
     """Messages Reply In Conversation
 
-    Delegated Apple domain tool 'messages_reply_in_conversation' exposed through Apple-Tools-MCP.
+    Reply to an Apple Messages conversation using its chat_id. Supports both one-to-one and group chats.
 
     Example:
         await messages_reply_in_conversation(client, chat_id='example_chat_id', text='example_text')

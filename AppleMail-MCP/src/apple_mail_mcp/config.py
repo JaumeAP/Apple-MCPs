@@ -39,11 +39,12 @@ def _parse_transport(value: str | None) -> str:
 
 
 def load_settings() -> Settings:
-    raw_profile = os.getenv("APPLE_MAIL_MCP_SAFETY_PROFILE", SafetyProfile.SAFE_MANAGE.value)
+    raw_profile = os.getenv("APPLE_MAIL_MCP_SAFETY_PROFILE", "").strip().lower() or SafetyProfile.SAFE_MANAGE.value
     try:
         safety_profile = SafetyProfile(raw_profile)
     except ValueError:
-        safety_profile = SafetyProfile.SAFE_MANAGE
+        # Fail closed: a typo must never grant write access.
+        safety_profile = SafetyProfile.SAFE_READONLY
 
     raw_port = os.getenv("APPLE_MAIL_MCP_PORT", "8000")
     try:

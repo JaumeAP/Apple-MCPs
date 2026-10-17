@@ -13,15 +13,40 @@ from pathlib import Path
 
 import pytest
 
-from apple_mcp_common.runtime import notify_resource_updated, notify_resources_changed, require_loopback_host
+from apple_mcp_common.runtime import (
+    clear_if_blank,
+    notify_resource_updated,
+    notify_resources_changed,
+    require_loopback_host,
+    swift_trim,
+)
 
 
-@pytest.mark.parametrize("host", ["localhost", "127.0.0.1", "127.42.0.9", "::1"])
+def test_swift_trim_matches_foundation_whitespace() -> None:
+    # Foundation trims U+200B, which str.strip() keeps, and keeps U+001C.
+    zwsp, ideographic_space = chr(0x200B), chr(0x3000)
+    assert swift_trim(f"{zwsp}{ideographic_space}ID-1\n{zwsp}") == "ID-1"
+    assert swift_trim("\x1cID") == "\x1cID"
+    assert swift_trim(zwsp) == ""
+
+
+def test_clear_if_blank_maps_blank_values_to_the_empty_string() -> None:
+    assert clear_if_blank(None) is None
+    for blank in ("", " ", "\n\t", "​", "‌‍﻿", " ​ "):
+        assert clear_if_blank(blank) == ""
+    for kept in ("a", " a ", "​a​", "\x1c"):
+        assert clear_if_blank(kept) == kept
+
+
+@pytest.mark.parametrize("host", ["localhost", "127.0.0.1", "::1"])
 def test_require_loopback_host_accepts_local_addresses(host: str) -> None:
     assert require_loopback_host(host) == host
 
 
-@pytest.mark.parametrize("host", ["0.0.0.0", "::", "192.168.1.2", "example.com", ""])
+@pytest.mark.parametrize(
+    "host",
+    ["0.0.0.0", "::", "192.168.1.2", "example.com", "", "127.42.0.9", "127.1", "0x7f.0.0.1", "2130706433", "::ffff:127.0.0.1", "[::1]"],
+)
 def test_require_loopback_host_rejects_network_exposure(host: str) -> None:
     with pytest.raises(ValueError, match="loopback"):
         require_loopback_host(host)

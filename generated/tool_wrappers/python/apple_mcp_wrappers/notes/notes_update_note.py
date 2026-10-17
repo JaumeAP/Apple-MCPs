@@ -15,7 +15,7 @@ async def notes_update_note(
 ) -> Any:
     """Update Note
 
-    Update an existing note.
+    Update an existing note. A title, body or tags change rewrites the whole body: checklist state may be lost and notes with attachments are refused. Moving with folder_id alone keeps the body.
 
     Example:
         await notes_update_note(client, note_id='example_note_id', title='example_title')

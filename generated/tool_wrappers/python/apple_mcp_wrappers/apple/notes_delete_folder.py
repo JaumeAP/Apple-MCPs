@@ -11,7 +11,7 @@ async def notes_delete_folder(
 ) -> Any:
     """Notes Delete Folder
 
-    Delegated Apple domain tool 'notes_delete_folder' exposed through Apple-Tools-MCP.
+    Delete an Apple Notes folder together with every note inside it. Requires full_access.
 
     Example:
         await notes_delete_folder(client, folder_id='example_folder_id')

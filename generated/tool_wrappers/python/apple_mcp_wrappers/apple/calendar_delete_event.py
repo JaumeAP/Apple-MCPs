@@ -11,7 +11,7 @@ async def calendar_delete_event(
 ) -> Any:
     """Calendar Delete Event
 
-    Delegated Apple domain tool 'calendar_delete_event' exposed through Apple-Tools-MCP.
+    Delete a calendar event by event_id. With native Calendar access, a recurring event is deleted for one occurrence only, not the rest of the series: the occurrence named by an event_id from list or get ("<id>@<original start>"), or the first occurrence for a bare id. The automation fallback may delete the whole series.
 
     Example:
         await calendar_delete_event(client, event_id='example_event_id')

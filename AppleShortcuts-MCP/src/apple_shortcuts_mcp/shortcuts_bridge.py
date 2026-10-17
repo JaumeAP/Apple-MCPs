@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
@@ -32,6 +33,43 @@ class ShortcutsBridge:
         settings = load_settings()
         self.shortcuts_command = shortcuts_command or settings.shortcuts_command
         self.timeout_seconds = timeout_seconds or settings.command_timeout_seconds
+        self.allowed_roots = tuple(Path(os.path.realpath(root.expanduser())) for root in settings.allowed_roots)
+
+    def _confine_path(self, path: str, *, is_output: bool = False) -> str:
+        """Resolve a caller path with realpath and refuse it unless it sits inside an allowed root.
+
+        Hidden segments are refused even inside a root. ~/Library is refused unless the path sits
+        under an allowed root inside ~/Library (iCloud Drive by default, or an app folder you configure).
+        The Library checks ignore case: APFS is case-insensitive by default and realpath keeps the typed case.
+        ponytail: checked before the CLI runs, so a symlink swapped in afterwards is not caught.
+        """
+        resolved = Path(os.path.realpath(Path(path).expanduser()))
+        folded = Path(str(resolved).lower())
+        library = Path(os.path.realpath(Path.home() / "Library").lower())
+        folded_roots = [Path(str(root).lower()) for root in self.allowed_roots]
+        library_roots = [root for root in folded_roots if root.is_relative_to(library) and root != library]
+        # iCloud Drive stays reachable when a broader root (such as home) covers it.
+        icloud = Path(os.path.realpath(Path.home() / "Library/Mobile Documents/com~apple~CloudDocs").lower())
+        if any(icloud.is_relative_to(root) for root in folded_roots):
+            library_roots.append(icloud)
+        if (
+            any(part.startswith(".") for part in resolved.parts)
+            or (folded.is_relative_to(library) and not any(folded.is_relative_to(root) for root in library_roots))
+            or not any(resolved.is_relative_to(root) for root in self.allowed_roots)
+        ):
+            raise ShortcutsBridgeError(
+                "PATH_NOT_ALLOWED",
+                f"Path is outside the allowed roots: {resolved}",
+                "Use a path under Desktop, Documents, Downloads, iCloud Drive or the temp folder, "
+                "or set APPLE_SHORTCUTS_MCP_ALLOWED_ROOTS.",
+            )
+        if is_output and resolved.exists():
+            raise ShortcutsBridgeError(
+                "OUTPUT_PATH_EXISTS",
+                f"Output path already exists: {resolved}",
+                "Choose an output path that does not exist yet.",
+            )
+        return str(resolved)
 
     def cli_available(self) -> bool:
         return shutil.which(self.shortcuts_command) is not None
@@ -45,7 +83,8 @@ class ShortcutsBridge:
     def list_shortcuts(self, folder_name: str | None = None) -> list[ShortcutInfo]:
         args = ["list", "--show-identifiers"]
         if folder_name is not None:
-            args.extend(["--folder-name", folder_name])
+            # The --opt=value form keeps a value starting with "-" from being read as an option.
+            args.append(f"--folder-name={folder_name}")
         output = self._run_cli(args)
         items: list[ShortcutInfo] = []
         for line in self._split_lines(output.stdout):
@@ -56,7 +95,7 @@ class ShortcutsBridge:
 
     def view_shortcut(self, shortcut_name_or_identifier: str) -> ShortcutInfo:
         shortcut = self.resolve_shortcut(shortcut_name_or_identifier)
-        output = self._run_cli(["view", shortcut.name])
+        output = self._run_cli(["view", "--", shortcut.name])
         if output.returncode != 0:
             raise self._map_error("view", output)
         return shortcut
@@ -69,14 +108,19 @@ class ShortcutsBridge:
         output_type: str | None = None,
         input_text: str | None = None,
     ) -> ShortcutRunResponse:
+        input_paths = [self._confine_path(path) for path in input_paths or []]
+        if output_path is not None:
+            output_path = self._confine_path(output_path, is_output=True)
         shortcut = self.resolve_shortcut(shortcut_name_or_identifier)
-        args = ["run", shortcut.identifier or shortcut.name]
-        for path in input_paths or []:
+        args = ["run"]
+        for path in input_paths:
             args.extend(["--input-path", path])
         if output_path is not None:
             args.extend(["--output-path", output_path])
         if output_type is not None:
-            args.extend(["--output-type", output_type])
+            args.append(f"--output-type={output_type}")
+        # "--" ends option parsing, so a shortcut name starting with "-" stays positional.
+        args.extend(["--", shortcut.identifier or shortcut.name])
 
         output = self._run_cli(args, input_data=input_text)
         if output.returncode != 0:

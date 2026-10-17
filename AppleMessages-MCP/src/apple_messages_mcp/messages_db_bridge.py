@@ -7,6 +7,16 @@ from pathlib import Path
 from apple_messages_mcp.models import AttachmentRecord, ConversationRecord, ConversationSummary, MessageRecord, ParticipantRecord
 
 APPLE_EPOCH = datetime(2001, 1, 1, tzinfo=UTC)
+MAX_LIMIT = 500
+
+
+def _clamp_limit(limit: int) -> int:
+    return max(1, min(int(limit), MAX_LIMIT))
+
+
+def _like_pattern(query: str) -> str:
+    escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
 
 
 class MessagesDBBridgeError(Exception):
@@ -46,7 +56,7 @@ class MessagesDBBridge:
                 ORDER BY last_date IS NULL, last_date DESC
                 LIMIT ? OFFSET ?
                 """,
-                (limit, offset),
+                (_clamp_limit(limit), offset),
             ).fetchall()
 
             conversations = [self._conversation_summary(conn, row) for row in rows]
@@ -83,7 +93,7 @@ class MessagesDBBridge:
                 ORDER BY m.date DESC
                 LIMIT ? OFFSET ?
                 """,
-                (int(row["rowid"]), limit, offset),
+                (int(row["rowid"]), _clamp_limit(limit), offset),
             ).fetchall()
             message_records = [self._message_record(item) for item in reversed(messages)]
             return ConversationRecord(**summary.model_dump(), messages=message_records)
@@ -119,8 +129,9 @@ class MessagesDBBridge:
         offset: int = 0,
     ) -> list[MessageRecord]:
         with self._connect() as conn:
-            clauses = ["(COALESCE(m.text, '') LIKE ? OR COALESCE(m.subject, '') LIKE ?)"]
-            params: list[object] = [f"%{query}%", f"%{query}%"]
+            clauses = ["(COALESCE(m.text, '') LIKE ? ESCAPE '\\' OR COALESCE(m.subject, '') LIKE ? ESCAPE '\\')"]
+            pattern = _like_pattern(query)
+            params: list[object] = [pattern, pattern]
             if chat_id is not None:
                 clauses.append("(c.guid = ? OR CAST(c.ROWID AS TEXT) = ?)")
                 params.extend([chat_id, chat_id])
@@ -133,7 +144,7 @@ class MessagesDBBridge:
             if end_iso is not None:
                 clauses.append("m.date <= ?")
                 params.append(self._iso_to_messages_date(end_iso))
-            params.extend([limit, offset])
+            params.extend([_clamp_limit(limit), offset])
             rows = conn.execute(
                 f"""
                 SELECT m.ROWID AS message_rowid, m.guid AS message_guid, cmj.chat_id, m.text, m.subject, m.service AS service_name, m.date,
@@ -162,7 +173,7 @@ class MessagesDBBridge:
                 clauses.append("(m.guid = ? OR CAST(m.ROWID AS TEXT) = ?)")
                 params.extend([message_id, message_id])
             where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-            params.extend([limit, offset])
+            params.extend([_clamp_limit(limit), offset])
             rows = conn.execute(
                 f"""
                 SELECT a.ROWID AS attachment_rowid, a.guid AS attachment_guid, a.filename, a.mime_type, a.transfer_name,

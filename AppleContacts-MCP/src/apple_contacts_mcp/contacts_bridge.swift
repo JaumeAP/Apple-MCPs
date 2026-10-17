@@ -20,7 +20,9 @@
 // the whole set. Empty FIRST/LAST/ORG/NOTE on update leave the field unchanged.
 //
 // When APPLE_CONTACTS_MCP_BACKUP_DIR is set, update_contact and delete_contact first
-// save the contact there as a .vcf file (or .json when macOS refuses the vCard export).
+// save the contact there as a .vcf file (owner-only, 0600, in a 0700 directory).
+// When macOS refuses the vCard export, update_contact falls back to a partial .json
+// record and delete_contact refuses to run.
 import Contacts
 import Foundation
 
@@ -152,21 +154,30 @@ func findContact(_ id: String, keys: [CNKeyDescriptor] = summaryKeys) -> CNConta
 }
 
 // Writes to "<name>.<ext>", or "<name>-2.<ext>", "<name>-3.<ext>"... when that file
-// already exists, so two backups never overwrite each other.
+// already exists, so two backups never overwrite each other. The file is created
+// owner-only (0600) from the start: backups hold personal data.
 func writeNewFile(_ data: Data, dir: URL, name: String, ext: String) throws {
     var suffix = 1
     while true {
         let file = dir.appendingPathComponent(suffix == 1 ? name : "\(name)-\(suffix)").appendingPathExtension(ext)
-        do {
-            try data.write(to: file, options: .withoutOverwriting)
-            return
-        } catch where FileManager.default.fileExists(atPath: file.path) {
-            suffix += 1
+        let fd = open(file.path, O_WRONLY | O_CREAT | O_EXCL, 0o600)
+        if fd < 0 {
+            if errno == EEXIST {
+                suffix += 1
+                continue
+            }
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
         }
+        let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
+        try handle.write(contentsOf: data)
+        try handle.close()
+        return
     }
 }
 
-func backup(_ contact: CNContact) {
+// With requireVCard, a refused vCard export stops the change instead of falling
+// back to the partial JSON record: a delete must not lose fields the JSON lacks.
+func backup(_ contact: CNContact, requireVCard: Bool = false) {
     guard let rawDir = ProcessInfo.processInfo.environment["APPLE_CONTACTS_MCP_BACKUP_DIR"], !rawDir.isEmpty else {
         return
     }
@@ -177,11 +188,13 @@ func backup(_ contact: CNContact) {
     let safeId = contact.identifier.map { $0.isLetter || $0.isNumber || $0 == "-" ? $0 : "_" }
     let name = "\(stamp)_\(String(safeId))"
     do {
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         let vCardKeys = [CNContactVCardSerialization.descriptorForRequiredKeys()]
         if let full = try? store.unifiedContact(withIdentifier: contact.identifier, keysToFetch: vCardKeys),
            let data = try? CNContactVCardSerialization.data(with: [full]) {
             try writeNewFile(data, dir: dir, name: name, ext: "vcf")
+        } else if requireVCard {
+            fail("Backup failed, nothing was changed: macOS refused the vCard export, and a partial backup is not enough for a delete. Unset APPLE_CONTACTS_MCP_BACKUP_DIR to delete without a backup.")
         } else {
             let data = try JSONSerialization.data(withJSONObject: personJSON(contact), options: [.prettyPrinted, .sortedKeys])
             try writeNewFile(data, dir: dir, name: name, ext: "json")
@@ -305,7 +318,7 @@ case "delete_contact":
         emit(["contact_id": id, "deleted": false])
         exit(0)
     }
-    backup(original)
+    backup(original, requireVCard: true)
     let request = CNSaveRequest()
     request.delete(original.mutableCopy() as! CNMutableContact)
     execute(request)

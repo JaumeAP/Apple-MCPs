@@ -571,6 +571,26 @@ def test_apple_update_system_setting_dispatches(monkeypatch) -> None:
     assert result.setting == "autohide"
 
 
+def test_gui_input_tools_keep_destructive_annotations_and_source_descriptions() -> None:
+    for name in ("system_gui_click_menu_path", "system_gui_press_keys", "system_gui_type_text", "system_gui_click_button", "system_gui_choose_popup_value"):
+        tool = tools.mcp._tool_manager.get_tool(name)
+        assert tool.annotations.destructive_hint is True
+        assert "full_access" in tool.description
+        assert "APPLE_SYSTEM_MCP_GUI_ALLOWED_APPS" in tool.description
+        assert "terminals" in tool.description
+
+
+def test_reexported_tools_keep_every_source_annotation() -> None:
+    # The re-exported tool must warn exactly as its source server does.
+    for name in ("notes_update_note", "notes_append_to_note", "notes_delete_folder", "contacts_delete_contact"):
+        assert tools.mcp._tool_manager.get_tool(name).annotations.destructive_hint is True, name
+    # A source function re-exported as is keeps its description too.
+    assert "rewrites the whole body" in tools.mcp._tool_manager.get_tool("notes_update_note").description
+    control = tools.mcp._tool_manager.get_tool("apple_control_frontmost_app")
+    assert control.annotations.destructive_hint is True
+    assert "APPLE_SYSTEM_MCP_GUI_ALLOWED_APPS" in control.description
+
+
 def test_apple_control_frontmost_app_dispatches(monkeypatch) -> None:
     monkeypatch.setattr(
         tools,

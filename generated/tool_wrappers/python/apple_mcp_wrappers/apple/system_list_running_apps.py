@@ -10,7 +10,7 @@ async def system_list_running_apps(
 ) -> Any:
     """System List Running Apps
 
-    Delegated Apple domain tool 'system_list_running_apps' exposed through Apple-Tools-MCP.
+    List currently running foreground applications.
 
     Example:
         await system_list_running_apps(client)

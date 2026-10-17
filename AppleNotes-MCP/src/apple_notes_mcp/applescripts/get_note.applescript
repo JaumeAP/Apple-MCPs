@@ -10,7 +10,8 @@ on run argv
 				set fldName to my safe_text(name of fld)
 				repeat with n in notes of fld
 					if my safe_text(id of n) is targetNoteId then
-						set foundJson to "{" & quote & "found" & quote & ":true," & quote & "note" & quote & ":" & my note_json(accId, accName, fldId, fldName, n, true) & "}"
+						-- Read by id, not by the positional `n`: a concurrent edit reorders the folder.
+						set foundJson to "{" & quote & "found" & quote & ":true," & quote & "note" & quote & ":" & my note_json(accId, accName, fldId, fldName, note id targetNoteId, true) & "}"
 						exit repeat
 					end if
 				end repeat
@@ -79,7 +80,15 @@ on date_to_epoch(dateValue)
 	set month of epochDate to January
 	set day of epochDate to 1
 	set time of epochDate to 0
-	return (dateValue - epochDate) as integer
+	set elapsedSeconds to dateValue - epochDate
+	if elapsedSeconds < 0 then return "0"
+	-- Integers stop at 2^29, so any date after 1987 gives a real, and a real
+	-- becomes text with the locale's decimal separator ("1,79E+9" on ca_ES),
+	-- which is invalid JSON. Build the digits from two small integers.
+	set highPart to elapsedSeconds div 100000
+	set lowPart to (elapsedSeconds mod 100000) as integer
+	if highPart is 0 then return lowPart as text
+	return (highPart as text) & (text -5 thru -1 of ("0000" & lowPart))
 end date_to_epoch
 
 on safe_text(valueText)

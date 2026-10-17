@@ -12,7 +12,7 @@ async def system_read_preference_domain(
 ) -> Any:
     """System Read Preference Domain
 
-    Delegated Apple domain tool 'system_read_preference_domain' exposed through Apple-Tools-MCP.
+    Read a macOS preference domain through defaults export for a production-safe, structured settings view.
 
     Example:
         await system_read_preference_domain(client, domain='example_domain', current_host=False)

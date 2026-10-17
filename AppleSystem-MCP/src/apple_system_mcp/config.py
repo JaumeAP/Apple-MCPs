@@ -15,6 +15,7 @@ class Settings:
     log_level: str
     apps_helper_source: Path
     apps_helper_binary: Path
+    gui_allowed_apps: frozenset[str]
 
 
 def _parse_int(value: str | None, default: int) -> int:
@@ -44,4 +45,7 @@ def load_settings() -> Settings:
         log_level=os.environ.get("APPLE_SYSTEM_MCP_LOG_LEVEL", "INFO").strip().upper() or "INFO",
         apps_helper_source=Path(__file__).resolve().parent / "system_apps_bridge.swift",
         apps_helper_binary=helper_build_dir / "apple-system-apps-bridge",
+        gui_allowed_apps=frozenset(
+            item.strip().lower() for item in os.environ.get("APPLE_SYSTEM_MCP_GUI_ALLOWED_APPS", "").split(",") if item.strip()
+        ),
     )

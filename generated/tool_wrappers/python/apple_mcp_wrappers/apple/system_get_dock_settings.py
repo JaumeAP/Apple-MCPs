@@ -10,7 +10,7 @@ async def system_get_dock_settings(
 ) -> Any:
     """System Get Dock Settings
 
-    Delegated Apple domain tool 'system_get_dock_settings' exposed through Apple-Tools-MCP.
+    Read common macOS Dock settings such as autohide, magnification, and orientation.
 
     Example:
         await system_get_dock_settings(client)

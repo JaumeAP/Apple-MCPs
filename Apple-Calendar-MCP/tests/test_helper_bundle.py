@@ -21,7 +21,8 @@ def _successful_compile(monkeypatch, bridge):
 
     def compile_helper(command, **kwargs):
         calls.append(command)
-        bridge.helper_binary.write_bytes(b"test executable")
+        with open(command[command.index("-o") + 1], "wb") as output:
+            output.write(b"test executable")
         return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
     monkeypatch.setattr(subprocess, "run", compile_helper)
@@ -129,6 +130,37 @@ def test_missing_swiftc_has_actionable_error(monkeypatch, helper):
         bridge._ensure_helper()
 
     assert error.value.error_code == "SWIFTC_UNAVAILABLE"
+    assert not info_path.exists()
+
+
+def test_compile_writes_temp_file_and_renames_it_into_place(monkeypatch, helper):
+    bridge, _info_path = helper
+    calls = _successful_compile(monkeypatch, bridge)
+
+    bridge._ensure_helper()
+
+    output = calls[0][calls[0].index("-o") + 1]
+    assert output != str(bridge.helper_binary)
+    assert os.path.dirname(output) == str(bridge.helper_binary.parent)
+    assert bridge.helper_binary.read_bytes() == b"test executable"
+    assert sorted(path.name for path in bridge.helper_binary.parent.iterdir()) == [bridge.helper_binary.name]
+
+
+def test_compile_timeout_leaves_no_partial_binary(monkeypatch, helper):
+    bridge, info_path = helper
+
+    def stalled(command, **kwargs):
+        assert kwargs["timeout"] == CalendarBridge._COMPILE_TIMEOUT_SECONDS
+        with open(command[command.index("-o") + 1], "wb") as output:
+            output.write(b"half")
+        raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+
+    monkeypatch.setattr(subprocess, "run", stalled)
+    with pytest.raises(CalendarBridgeError) as error:
+        bridge._ensure_helper()
+
+    assert error.value.error_code == "HELPER_COMPILE_TIMEOUT"
+    assert list(bridge.helper_binary.parent.iterdir()) == []
     assert not info_path.exists()
 
 

@@ -11,7 +11,7 @@ async def calendar_get_event(
 ) -> Any:
     """Calendar Get Event
 
-    Delegated Apple domain tool 'calendar_get_event' exposed through Apple-Tools-MCP.
+    Fetch full details for a calendar event by event_id.
 
     Example:
         await calendar_get_event(client, event_id='example_event_id')
