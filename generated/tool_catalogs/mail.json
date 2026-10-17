@@ -453,7 +453,7 @@
       ],
       "name": "mail_reply_message",
       "read_only": false,
-      "risk_level": "medium",
+      "risk_level": "high",
       "schema_ref": "mail_reply_message",
       "tags": [
         "mail",
@@ -508,7 +508,7 @@
       ],
       "name": "mail_forward_message",
       "read_only": false,
-      "risk_level": "medium",
+      "risk_level": "high",
       "schema_ref": "mail_forward_message",
       "tags": [
         "mail",
@@ -701,7 +701,7 @@
       ],
       "name": "mail_reply_latest_in_thread",
       "read_only": false,
-      "risk_level": "medium",
+      "risk_level": "high",
       "schema_ref": "mail_reply_latest_in_thread",
       "tags": [
         "mail",
@@ -750,7 +750,7 @@
       ],
       "name": "mail_archive_thread",
       "read_only": false,
-      "risk_level": "medium",
+      "risk_level": "high",
       "schema_ref": "mail_archive_thread",
       "tags": [
         "mail",

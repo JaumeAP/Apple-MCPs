@@ -13,7 +13,7 @@ async def notes_append_to_note(
 ) -> Any:
     """Append to Note
 
-    Append text to an existing note without replacing its current content. Provide body_text for plain text or body_html for rich content.
+    Append text to the end of an existing note. Notes has no native append, so the whole body is rewritten: checklist state may be lost and concurrent edits can be overwritten. Notes with attachments are refused. Provide body_text for plain text or body_html for rich content.
 
     Example:
         await notes_append_to_note(client, note_id='example_note_id', body_text='example_body_text')
