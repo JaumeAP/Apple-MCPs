@@ -43,7 +43,7 @@
         "server.py"
       ],
       "env": {
-        "APPLE_SHORTCUTS_MCP_SAFETY_MODE": "full_access"
+        "APPLE_SHORTCUTS_MCP_SAFETY_MODE": "safe_manage"
       }
     }
   },

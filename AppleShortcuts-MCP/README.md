@@ -61,7 +61,7 @@ This builds one workspace environment with every server's entry point in `.venv/
       "command": "uvx",
       "args": ["apple-shortcuts-mcp"],
       "env": {
-        "APPLE_SHORTCUTS_MCP_SAFETY_MODE": "full_access"
+        "APPLE_SHORTCUTS_MCP_SAFETY_MODE": "safe_manage"
       }
     }
   }
@@ -80,6 +80,10 @@ claude mcp add --transport stdio --scope project apple-shortcuts -- uvx apple-sh
 ```
 
 </details>
+
+## Safety Modes
+
+`APPLE_SHORTCUTS_MCP_SAFETY_MODE` accepts `safe_readonly`, `safe_manage` and `full_access`. The default, when it is unset, is `safe_manage`. An unrecognized mode falls back to `safe_readonly`.
 
 ## Transport
 
