@@ -6,6 +6,23 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 ## [Unreleased]
 
+## [1.0.5-jap.22] - 2026-10-22 (JaumeAP fork)
+
+### Added
+
+- Files: `files_read_chunk(path, offset, length)` reads a byte range of any file as
+  base64 and returns `next_offset` and `eof`, so a large file is read in parts without
+  loading it whole (1 MB per call at most).
+- Files: `files_append_file(path, text | content_base64)` appends to an existing file
+  and never creates one. With `files_create_file(text="")` it writes a large file in
+  parts (10 MB per call at most). It is a `safe_manage` action.
+
+### Changed
+
+- Files: editing `~/.config/apple-files-mcp/allowed-roots` takes effect on the next
+  call, without restarting the server (the settings cache is keyed on the file's
+  modification time).
+
 ## [1.0.5-jap.21] - 2026-10-14 (JaumeAP fork)
 
 ### Added

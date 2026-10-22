@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 
 from mcp.server.mcpserver import Context, MCPServer
@@ -10,6 +11,7 @@ from apple_files_mcp.files_bridge import FilesBridgeError, build_bridge
 from apple_files_mcp.models import (
     ErrorResponse,
     FileActionResponse,
+    FileChunkResponse,
     FileListResponse,
     FileMutationResponse,
     FileResponse,
@@ -253,6 +255,31 @@ def files_read_text_file(path: str, max_bytes: int = 100_000) -> FileTextRespons
 
 
 @mcp.tool(
+    title="Read File Chunk",
+    description=(
+        "Read length bytes of any file inside the allowed roots, starting at offset, as base64. Repeat with "
+        "next_offset until eof is true to read a large file without loading it whole."
+    ),
+    annotations=ToolAnnotations(read_only_hint=True, idempotent_hint=True),
+    structured_output=True,
+)
+def files_read_chunk(path: str, offset: int = 0, length: int = 100_000) -> FileChunkResponse | ErrorResponse:
+    try:
+        ensure_action_allowed("files_read_chunk")
+        data, next_offset, eof = _bridge().read_chunk(path, offset=offset, length=length)
+        return FileChunkResponse(
+            path=path,
+            offset=offset,
+            length=len(data),
+            next_offset=next_offset,
+            eof=eof,
+            content_base64=base64.b64encode(data).decode("ascii"),
+        )
+    except (SafetyError, FilesBridgeError, OSError) as exc:
+        return _exception_response(exc)
+
+
+@mcp.tool(
     title="Recent Files",
     description="List recently modified files inside the allowed roots.",
     annotations=ToolAnnotations(read_only_hint=True, idempotent_hint=True),
@@ -422,6 +449,28 @@ async def files_create_file(
         created = _bridge().create_file(path, text=text, content_base64=content_base64)
         await notify_resources_changed(ctx)
         return FileMutationResponse(path=created, action="created")
+    except (SafetyError, FilesBridgeError, OSError) as exc:
+        return _exception_response(exc)
+
+
+@mcp.tool(
+    title="Append To File",
+    description=(
+        "Append text or content_base64 (exactly one) to the end of an existing file inside the allowed roots. "
+        "Create the file empty with files_create_file (text=\"\"), then call this once per chunk to write a large "
+        "file in parts. Never creates a file, and no segment below the allowed root may start with a dot."
+    ),
+    annotations=ToolAnnotations(destructive_hint=False, idempotent_hint=False, open_world_hint=False),
+    structured_output=True,
+)
+async def files_append_file(
+    path: str, ctx: Context, text: str | None = None, content_base64: str | None = None
+) -> FileMutationResponse | ErrorResponse:
+    try:
+        ensure_action_allowed("files_append_file")
+        appended = _bridge().append_file(path, text=text, content_base64=content_base64)
+        await notify_resources_changed(ctx)
+        return FileMutationResponse(path=appended, action="appended")
     except (SafetyError, FilesBridgeError, OSError) as exc:
         return _exception_response(exc)
 

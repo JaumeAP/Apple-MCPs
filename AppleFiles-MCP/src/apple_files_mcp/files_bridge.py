@@ -404,8 +404,8 @@ class FilesBridge:
         source_path.rename(destination_path)
         return str(source_path), str(destination_path)
 
-    def create_file(self, path: str, text: str | None = None, content_base64: str | None = None) -> str:
-        # An empty string on the unused parameter means unset; text="" alone is an empty file.
+    def _payload(self, text: str | None, content_base64: str | None) -> bytes:
+        # An empty string on the unused parameter means unset; text="" alone is an empty payload.
         if content_base64 == "" and text is not None:
             content_base64 = None
         elif text == "" and content_base64 is not None:
@@ -421,6 +421,35 @@ class FilesBridge:
             payload = (text or "").encode("utf-8")
         if len(payload) > self._MAX_WRITE_BYTES:
             raise FilesBridgeError("TOO_LARGE", f"Content is {len(payload)} bytes; the limit is {self._MAX_WRITE_BYTES}.", "Create the file in smaller parts or copy it instead.")
+        return payload
+
+    def read_chunk(self, path: str, offset: int = 0, length: int = 100_000) -> tuple[bytes, int, bool]:
+        """Read length bytes from offset; returns the bytes, the next offset and whether the end was reached."""
+        file_path = self._ensure_allowed(path)
+        if not stat.S_ISREG(file_path.stat().st_mode):
+            raise FilesBridgeError("NOT_A_FILE", f"Path is not a regular file: {file_path}", "Choose a file path.")
+        if offset < 0:
+            raise FilesBridgeError("INVALID_INPUT", "offset must not be negative.", "Start at 0 or at the previous next_offset.")
+        length = max(1, min(length, self._MAX_READ_BYTES))
+        with file_path.open("rb") as handle:
+            handle.seek(offset)
+            data = handle.read(length)
+            eof = not handle.read(1)
+        return data, offset + len(data), eof
+
+    def append_file(self, path: str, text: str | None = None, content_base64: str | None = None) -> str:
+        payload = self._payload(text, content_base64)
+        target = self._ensure_allowed(path, refuse_hidden=True)
+        if not stat.S_ISREG(target.stat().st_mode):
+            raise FilesBridgeError("NOT_A_FILE", f"Path is not a regular file: {target}", "Choose a file path.")
+        # No O_CREAT: appending never creates a file, files_create_file does.
+        fd = os.open(target, os.O_WRONLY | os.O_APPEND)
+        with os.fdopen(fd, "ab") as handle:
+            handle.write(payload)
+        return str(target)
+
+    def create_file(self, path: str, text: str | None = None, content_base64: str | None = None) -> str:
+        payload = self._payload(text, content_base64)
         destination = self._ensure_allowed(path, allow_missing=True, refuse_hidden=True)
         # Exclusive create: an existing file or folder is never overwritten.
         try:

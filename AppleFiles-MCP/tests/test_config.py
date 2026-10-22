@@ -1,8 +1,9 @@
+import os
 from pathlib import Path
 
 import pytest
 
-from apple_files_mcp.config import _default_roots, _parse_roots, _roots_value, roots_file
+from apple_files_mcp.config import _default_roots, _parse_roots, _roots_value, load_settings, roots_file
 from apple_files_mcp.roots import main as roots_main
 
 
@@ -55,6 +56,17 @@ def test_an_empty_roots_file_fails_closed(home) -> None:
     _write_roots(home, "# nothing allowed\n")
 
     assert _parse_roots(_roots_value("/tmp/ignored")) == ()
+
+
+def test_editing_the_roots_file_changes_the_settings_without_a_restart(home) -> None:
+    _write_roots(home, "/tmp/a\n/tmp/b\n")
+    assert load_settings().allowed_roots == (Path("/tmp/a"), Path("/tmp/b"))
+
+    roots_file().write_text("/tmp/a\n")
+    stat = roots_file().stat()
+    os.utime(roots_file(), ns=(stat.st_atime_ns, stat.st_mtime_ns + 1))
+
+    assert load_settings().allowed_roots == (Path("/tmp/a"),)
 
 
 def test_the_roots_command_adds_lists_and_removes(home, capsys) -> None:

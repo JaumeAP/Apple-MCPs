@@ -144,6 +144,44 @@ def test_create_file_writes_text_and_binary_and_never_overwrites(tmp_path) -> No
     assert text_path.read_text(encoding="utf-8") == "# Título\n"
 
 
+def test_a_file_is_written_in_chunks_and_read_back_in_chunks(tmp_path) -> None:
+    bridge = FilesBridge((tmp_path,))
+    target = tmp_path / "big.bin"
+    payload = bytes(range(256)) * 10
+    bridge.create_file(str(target), text="")
+
+    for start in range(0, len(payload), 1000):
+        bridge.append_file(str(target), content_base64=base64.b64encode(payload[start : start + 1000]).decode())
+    assert target.read_bytes() == payload
+
+    collected, offset, eof = b"", 0, False
+    while not eof:
+        data, offset, eof = bridge.read_chunk(str(target), offset=offset, length=700)
+        collected += data
+    assert collected == payload
+    assert bridge.read_chunk(str(target), offset=len(payload)) == (b"", len(payload), True)
+
+
+def test_append_file_never_creates_and_refuses_bad_input(tmp_path) -> None:
+    bridge = FilesBridge((tmp_path,))
+    (tmp_path / "a.txt").write_text("x")
+
+    with pytest.raises(FilesBridgeError) as excinfo:
+        bridge.append_file(str(tmp_path / "missing.txt"), text="y")
+    assert excinfo.value.error_code == "PATH_NOT_FOUND"
+    assert not (tmp_path / "missing.txt").exists()
+    with pytest.raises(FilesBridgeError) as excinfo:
+        bridge.append_file(str(tmp_path), text="y")
+    assert excinfo.value.error_code == "NOT_A_FILE"
+    with pytest.raises(FilesBridgeError) as excinfo:
+        bridge.append_file(str(tmp_path / "a.txt"), text="y", content_base64="eQ==")
+    assert excinfo.value.error_code == "INVALID_INPUT"
+    with pytest.raises(FilesBridgeError) as excinfo:
+        bridge.read_chunk(str(tmp_path / "a.txt"), offset=-1)
+    assert excinfo.value.error_code == "INVALID_INPUT"
+    assert (tmp_path / "a.txt").read_text() == "x"
+
+
 def test_create_file_rejects_bad_input_and_locations(monkeypatch, tmp_path) -> None:
     root = tmp_path / "root"
     root.mkdir()

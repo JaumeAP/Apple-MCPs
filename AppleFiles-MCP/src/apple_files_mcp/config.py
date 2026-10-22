@@ -72,8 +72,15 @@ def _parse_roots(value: str | None) -> tuple[Path, ...]:
     return tuple(roots)
 
 
+def _roots_mtime() -> int | None:
+    try:
+        return roots_file().stat().st_mtime_ns
+    except OSError:
+        return None
+
+
 @lru_cache(maxsize=1)
-def load_settings() -> Settings:
+def _load_settings(roots_mtime: int | None) -> Settings:  # roots_mtime only keys the cache
     return Settings(
         server_name="Apple Files MCP",
         version="1.0.5",
@@ -84,3 +91,11 @@ def load_settings() -> Settings:
         port=_parse_int(os.environ.get("APPLE_FILES_MCP_PORT"), 8000),
         log_level=os.environ.get("APPLE_FILES_MCP_LOG_LEVEL", "INFO").strip().upper() or "INFO",
     )
+
+
+def load_settings() -> Settings:
+    # Keyed on the roots file mtime, so editing the file takes effect without a restart.
+    return _load_settings(_roots_mtime())
+
+
+load_settings.cache_clear = _load_settings.cache_clear  # pyright: ignore[reportFunctionMemberAccess]
