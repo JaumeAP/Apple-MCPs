@@ -19,6 +19,7 @@ READ_ONLY_ACTIONS = {
     "files_search_files",
     "files_get_file_info",
     "files_read_text_file",
+    "files_read_chunk",
     "files_recent_files",
     "files_get_tags",
     "files_list_recent_locations",
@@ -28,6 +29,7 @@ READ_ONLY_ACTIONS = {
 MANAGE_ACTIONS = {
     "files_create_folder",
     "files_create_file",
+    "files_append_file",
     "files_move_path",
     "files_copy_path",
     "files_open_path",

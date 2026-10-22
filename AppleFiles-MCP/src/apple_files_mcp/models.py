@@ -58,6 +58,16 @@ class FileTextResponse(BaseModel):
     truncated: bool = False
 
 
+class FileChunkResponse(BaseModel):
+    ok: bool = True
+    path: str
+    offset: int
+    length: int
+    next_offset: int
+    eof: bool
+    content_base64: str
+
+
 class FileMutationResponse(BaseModel):
     ok: bool = True
     path: str
