@@ -448,6 +448,44 @@ class FilesBridge:
             handle.write(payload)
         return str(target)
 
+    def replace_text(self, path: str, old_text: str, new_text: str, replace_all: bool = False) -> tuple[str, int]:
+        """Replace old_text with new_text inside a UTF-8 file; returns the path and the number of replacements."""
+        if not old_text:
+            raise FilesBridgeError("INVALID_INPUT", "old_text must not be empty.", "Pass the exact text to replace.")
+        target = self._ensure_allowed(path, refuse_hidden=True)
+        mode = target.stat().st_mode
+        if not stat.S_ISREG(mode):
+            raise FilesBridgeError("NOT_A_FILE", f"Path is not a regular file: {target}", "Choose a file path.")
+        if target.stat().st_size > self._MAX_READ_BYTES:
+            raise FilesBridgeError("TOO_LARGE", f"File is larger than {self._MAX_READ_BYTES} bytes.", "Edit a smaller file.")
+        try:
+            content = target.read_text(encoding="utf-8")
+        except UnicodeDecodeError as exc:
+            raise FilesBridgeError("READ_FAILED", f"File is not valid UTF-8: {target}", "Only UTF-8 text files can be edited.") from exc
+        count = content.count(old_text)
+        if count == 0:
+            raise FilesBridgeError("TEXT_NOT_FOUND", "old_text does not appear in the file.", "Read the file and copy the exact text.")
+        if count > 1 and not replace_all:
+            raise FilesBridgeError(
+                "TEXT_NOT_UNIQUE",
+                f"old_text appears {count} times.",
+                "Add surrounding text to make it unique, or pass replace_all=true.",
+            )
+        updated = content.replace(old_text, new_text)
+        if len(updated.encode("utf-8")) > self._MAX_WRITE_BYTES:
+            raise FilesBridgeError("TOO_LARGE", "The edited file would exceed the size limit.", "Make a smaller edit.")
+        # Write beside the target and rename over it: a failed write never leaves a half-edited file.
+        temporary = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+        try:
+            with temporary.open("xb") as handle:
+                handle.write(updated.encode("utf-8"))
+            os.chmod(temporary, stat.S_IMODE(mode))
+            os.replace(temporary, target)
+        except OSError:
+            temporary.unlink(missing_ok=True)
+            raise
+        return str(target), count
+
     def create_file(self, path: str, text: str | None = None, content_base64: str | None = None) -> str:
         payload = self._payload(text, content_base64)
         destination = self._ensure_allowed(path, allow_missing=True, refuse_hidden=True)
