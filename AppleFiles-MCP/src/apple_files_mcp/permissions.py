@@ -30,6 +30,7 @@ MANAGE_ACTIONS = {
     "files_create_folder",
     "files_create_file",
     "files_append_file",
+    "files_replace_text",
     "files_move_path",
     "files_copy_path",
     "files_open_path",
