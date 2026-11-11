@@ -6,11 +6,20 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 ## [Unreleased]
 
+## [1.0.5-jap.23] - 2026-11-11 (JaumeAP fork)
+
 ### Added
 
 - Files: `files_replace_text(path, old_text, new_text, replace_all)` replaces text inside
   an existing UTF-8 file. `old_text` must be unique unless `replace_all` is true; the
   file is rewritten atomically and keeps its permissions. It is a `safe_manage` action.
+
+### Changed
+
+- System: the plugin runs apple-system with `APPLE_SYSTEM_MCP_SAFETY_MODE=full_access`
+  and `APPLE_SYSTEM_MCP_GUI_ALLOWED_APPS=com.apple.UserNotificationCenter`, so the GUI
+  click and key tools can answer macOS permission dialogs. GUI input stays limited to
+  that one app, and terminals and script-capable apps stay refused.
 
 ## [1.0.5-jap.22] - 2026-10-22 (JaumeAP fork)
 
