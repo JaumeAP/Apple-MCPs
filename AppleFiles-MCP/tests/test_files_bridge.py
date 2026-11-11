@@ -182,6 +182,49 @@ def test_append_file_never_creates_and_refuses_bad_input(tmp_path) -> None:
     assert (tmp_path / "a.txt").read_text() == "x"
 
 
+def test_replace_text_edits_in_place_and_refuses_ambiguity(tmp_path) -> None:
+    bridge = FilesBridge((tmp_path,))
+    target = tmp_path / "a.txt"
+    target.write_text("uno dos uno\n", encoding="utf-8")
+    target.chmod(0o640)
+
+    with pytest.raises(FilesBridgeError) as excinfo:
+        bridge.replace_text(str(target), "uno", "tres")
+    assert excinfo.value.error_code == "TEXT_NOT_UNIQUE"
+    with pytest.raises(FilesBridgeError) as excinfo:
+        bridge.replace_text(str(target), "cuatro", "x")
+    assert excinfo.value.error_code == "TEXT_NOT_FOUND"
+    with pytest.raises(FilesBridgeError) as excinfo:
+        bridge.replace_text(str(target), "", "x")
+    assert excinfo.value.error_code == "INVALID_INPUT"
+    assert target.read_text(encoding="utf-8") == "uno dos uno\n"
+
+    assert bridge.replace_text(str(target), "dos", "DOS") == (str(target.resolve()), 1)
+    assert bridge.replace_text(str(target), "uno", "1", replace_all=True) == (str(target.resolve()), 2)
+    assert target.read_text(encoding="utf-8") == "1 DOS 1\n"
+    assert target.stat().st_mode & 0o777 == 0o640
+    assert [item.name for item in tmp_path.iterdir()] == ["a.txt"]
+
+
+def test_replace_text_refuses_folders_binary_and_outside_roots(tmp_path) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    bridge = FilesBridge((root,))
+    (root / "b.bin").write_bytes(b"\xff\xfe\x00")
+    (tmp_path / "outside.txt").write_text("x")
+
+    with pytest.raises(FilesBridgeError) as excinfo:
+        bridge.replace_text(str(root), "x", "y")
+    assert excinfo.value.error_code == "NOT_A_FILE"
+    with pytest.raises(FilesBridgeError) as excinfo:
+        bridge.replace_text(str(root / "b.bin"), "x", "y")
+    assert excinfo.value.error_code == "READ_FAILED"
+    with pytest.raises(FilesBridgeError) as excinfo:
+        bridge.replace_text(str(tmp_path / "outside.txt"), "x", "y")
+    assert excinfo.value.error_code == "PATH_NOT_ALLOWED"
+    assert (tmp_path / "outside.txt").read_text() == "x"
+
+
 def test_create_file_rejects_bad_input_and_locations(monkeypatch, tmp_path) -> None:
     root = tmp_path / "root"
     root.mkdir()

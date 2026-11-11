@@ -6,6 +6,12 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 ## [Unreleased]
 
+### Added
+
+- Files: `files_replace_text(path, old_text, new_text, replace_all)` replaces text inside
+  an existing UTF-8 file. `old_text` must be unique unless `replace_all` is true; the
+  file is rewritten atomically and keeps its permissions. It is a `safe_manage` action.
+
 ## [1.0.5-jap.22] - 2026-10-22 (JaumeAP fork)
 
 ### Added

@@ -476,6 +476,28 @@ async def files_append_file(
 
 
 @mcp.tool(
+    title="Replace Text In File",
+    description=(
+        "Replace old_text with new_text inside an existing UTF-8 text file inside the allowed roots. old_text must "
+        "appear exactly once unless replace_all is true. The file is rewritten atomically and keeps its permissions. "
+        "No segment below the allowed root may start with a dot."
+    ),
+    annotations=ToolAnnotations(destructive_hint=True, idempotent_hint=False, open_world_hint=False),
+    structured_output=True,
+)
+async def files_replace_text(
+    path: str, old_text: str, new_text: str, ctx: Context, replace_all: bool = False
+) -> FileMutationResponse | ErrorResponse:
+    try:
+        ensure_action_allowed("files_replace_text")
+        edited, _count = _bridge().replace_text(path, old_text, new_text, replace_all=replace_all)
+        await notify_resources_changed(ctx)
+        return FileMutationResponse(path=edited, action="replaced")
+    except (SafetyError, FilesBridgeError, OSError) as exc:
+        return _exception_response(exc)
+
+
+@mcp.tool(
     title="Move Path",
     description=(
         "Move or rename a file or folder inside the allowed roots. An allowed root, or a folder that contains one, "

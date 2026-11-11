@@ -52,7 +52,11 @@
     },
     "apple-system": {
       "command": "uv",
-      "args": ["run", "--directory", "${CLAUDE_PLUGIN_ROOT}/AppleSystem-MCP", "apple-system-mcp"]
+      "args": ["run", "--directory", "${CLAUDE_PLUGIN_ROOT}/AppleSystem-MCP", "apple-system-mcp"],
+      "env": {
+        "APPLE_SYSTEM_MCP_SAFETY_MODE": "full_access",
+        "APPLE_SYSTEM_MCP_GUI_ALLOWED_APPS": "com.apple.UserNotificationCenter"
+      }
     },
     "apple-notes": {
       "command": "uv",
