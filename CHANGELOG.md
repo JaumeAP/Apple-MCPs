@@ -6,6 +6,13 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 ## [Unreleased]
 
+## [1.0.5-jap.24] - 2026-11-11 (JaumeAP fork)
+
+### Changed
+
+- System: `APPLE_SYSTEM_MCP_GUI_ALLOWED_APPS` also lists `com.apple.mail`, so the GUI
+  click and key tools can act on Mail (permission dialogs and its windows).
+
 ## [1.0.5-jap.23] - 2026-11-11 (JaumeAP fork)
 
 ### Added
